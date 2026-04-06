@@ -62,9 +62,11 @@ def upload():
             "status": "ok",
             "report_url": f"/reports/{report_filename}",
             "summary": {
-                "total_events": summary["total_events"],
-                "unique_users": summary["unique_users"],
-                "unique_sessions": summary["unique_sessions"],
+                "total_records": summary.get("total_records", summary.get("total_events", 0)),
+                "unique_metrics": summary.get("unique_metrics", summary.get("unique_users", 0)),
+                "unique_workflows": summary.get("unique_workflows", summary.get("unique_sessions", 0)),
+                "unique_environments": summary.get("unique_environments", 0),
+                "date_range": summary.get("date_range", {}),
                 "anomalies_found": len(results.get("anomalies", [])),
                 "deviations_found": len(results.get("deviations", [])),
             }
