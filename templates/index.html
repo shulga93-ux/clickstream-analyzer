@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clickstream Analyzer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: #f0f2f5; min-height: 100vh; display: flex; flex-direction: column;
+         align-items: center; justify-content: center; padding: 24px; }
+  .card { background: white; border-radius: 16px; padding: 40px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.12); width: 100%; max-width: 520px; }
+  .logo { text-align: center; margin-bottom: 32px; }
+  .logo h1 { font-size: 1.8rem; font-weight: 700; color: #1a1a2e; }
+  .logo p { color: #888; margin-top: 8px; }
+  .drop-zone { border: 2px dashed #d0d7de; border-radius: 12px; padding: 40px 24px;
+               text-align: center; cursor: pointer; transition: all 0.2s;
+               background: #fafbfc; position: relative; }
+  .drop-zone:hover, .drop-zone.dragover { border-color: #4f8ef7; background: #f0f6ff; }
+  .drop-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+  .drop-zone .icon { font-size: 3rem; margin-bottom: 12px; }
+  .drop-zone .hint { color: #888; font-size: 0.9rem; margin-top: 8px; }
+  .selected-file { margin-top: 12px; padding: 10px 14px; background: #f0f6ff;
+                   border-radius: 8px; font-size: 0.9rem; color: #4f8ef7; display: none; }
+  .btn { display: block; width: 100%; padding: 14px; background: #4f8ef7; color: white;
+         border: none; border-radius: 10px; font-size: 1rem; font-weight: 600;
+         cursor: pointer; margin-top: 20px; transition: background 0.2s; }
+  .btn:hover { background: #3a7de0; }
+  .btn:disabled { background: #b0c4e8; cursor: not-allowed; }
+  .progress { display: none; margin-top: 16px; }
+  .progress-bar { height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; width: 0; background: #4f8ef7;
+                   border-radius: 3px; transition: width 0.3s; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+  .progress-text { text-align: center; font-size: 0.85rem; color: #888; margin-top: 8px; }
+  .result { display: none; margin-top: 20px; padding: 20px; border-radius: 12px; }
+  .result.success { background: #f0faf4; border: 1px solid #82e0aa; }
+  .result.error { background: #fff5f5; border: 1px solid #f5b7b1; }
+  .result h3 { margin-bottom: 12px; }
+  .result.success h3 { color: #1e8449; }
+  .result.error h3 { color: #c0392b; }
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .stat-item { background: white; padding: 10px; border-radius: 8px; text-align: center; }
+  .stat-item .num { font-size: 1.4rem; font-weight: 700; color: #4f8ef7; }
+  .stat-item .lbl { font-size: 0.75rem; color: #888; }
+  .open-btn { display: block; text-align: center; padding: 12px; background: #1e8449;
+              color: white; text-decoration: none; border-radius: 8px; font-weight: 600; }
+  .formats { margin-top: 28px; border-top: 1px solid #f0f2f5; padding-top: 20px; }
+  .formats h4 { font-size: 0.85rem; color: #888; margin-bottom: 10px; text-transform: uppercase; }
+  .format-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.8rem; }
+  .format-item { background: #f8f9fa; padding: 8px 10px; border-radius: 6px; }
+  .format-item code { color: #4f8ef7; font-size: 0.75rem; }
+  .recent { margin-top: 20px; }
+  .recent h4 { font-size: 0.85rem; color: #888; margin-bottom: 8px; text-transform: uppercase; }
+  .recent-list { list-style: none; }
+  .recent-list li { padding: 6px 0; border-bottom: 1px solid #f0f2f5; font-size: 0.85rem; }
+  .recent-list a { color: #4f8ef7; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <h1>📊 Clickstream Analyzer</h1>
+    <p>Загрузите данные — получите отчёт с аномалиями и трендами</p>
+  </div>
+
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" accept=".csv,.json,.jsonl,.ndjson">
+    <div class="icon">📂</div>
+    <div><strong>Перетащите файл</strong> или нажмите для выбора</div>
+    <div class="hint">CSV, JSON, JSONL · до 50 МБ</div>
+  </div>
+  <div class="selected-file" id="selectedFile"></div>
+
+  <button class="btn" id="analyzeBtn" disabled onclick="analyze()">Анализировать</button>
+
+  <div class="progress" id="progress">
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-text" id="progressText">Обрабатываем данные...</div>
+  </div>
+
+  <div class="result" id="result"></div>
+
+  <div class="formats">
+    <h4>Ожидаемые колонки</h4>
+    <div class="format-cols">
+      <div class="format-item"><code>timestamp</code> — дата/время события</div>
+      <div class="format-item"><code>user_id</code> — ID пользователя</div>
+      <div class="format-item"><code>event_type</code> — тип события</div>
+      <div class="format-item"><code>session_id</code> — ID сессии</div>
+      <div class="format-item"><code>page</code> / <code>url</code> — страница</div>
+      <div class="format-item"><code>duration</code> — длительность (опц.)</div>
+    </div>
+  </div>
+
+  <div class="recent" id="recentSection" style="display:none">
+    <h4>Последние отчёты</h4>
+    <ul class="recent-list" id="recentList"></ul>
+  </div>
+</div>
+
+<script>
+  const dropZone = document.getElementById("dropZone");
+  const fileInput = document.getElementById("fileInput");
+  const analyzeBtn = document.getElementById("analyzeBtn");
+  const selectedFile = document.getElementById("selectedFile");
+  let selectedFileObj = null;
+
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files[0]) selectFile(fileInput.files[0]);
+  });
+
+  dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+  dropZone.addEventListener("drop", e => {
+    e.preventDefault(); dropZone.classList.remove("dragover");
+    if (e.dataTransfer.files[0]) selectFile(e.dataTransfer.files[0]);
+  });
+
+  function selectFile(file) {
+    selectedFileObj = file;
+    const size = file.size > 1024*1024 ? `${(file.size/1024/1024).toFixed(1)} МБ` : `${(file.size/1024).toFixed(0)} КБ`;
+    selectedFile.style.display = "block";
+    selectedFile.textContent = `📄 ${file.name} (${size})`;
+    analyzeBtn.disabled = false;
+  }
+
+  async function analyze() {
+    if (!selectedFileObj) return;
+    analyzeBtn.disabled = true;
+    document.getElementById("progress").style.display = "block";
+    document.getElementById("result").style.display = "none";
+
+    const fill = document.getElementById("progressFill");
+    const text = document.getElementById("progressText");
+    fill.style.width = "30%"; text.textContent = "Загружаем файл...";
+
+    const formData = new FormData();
+    formData.append("file", selectedFileObj);
+
+    try {
+      fill.style.width = "60%"; text.textContent = "Анализируем данные...";
+      const resp = await fetch("/upload", { method: "POST", body: formData });
+      fill.style.width = "90%"; text.textContent = "Генерируем отчёт...";
+      const data = await resp.json();
+      fill.style.width = "100%";
+      setTimeout(() => showResult(data, resp.ok), 300);
+    } catch(e) {
+      showResult({ error: "Ошибка соединения: " + e.message }, false);
+    }
+  }
+
+  function showResult(data, ok) {
+    document.getElementById("progress").style.display = "none";
+    const el = document.getElementById("result");
+    el.style.display = "block";
+    analyzeBtn.disabled = false;
+
+    if (ok && data.report_url) {
+      const s = data.summary;
+      el.className = "result success";
+      el.innerHTML = `
+        <h3>✅ Анализ завершён</h3>
+        <div class="stats-grid">
+          <div class="stat-item"><div class="num">${s.total_events.toLocaleString()}</div><div class="lbl">Событий</div></div>
+          <div class="stat-item"><div class="num">${s.unique_users.toLocaleString()}</div><div class="lbl">Пользователей</div></div>
+          <div class="stat-item"><div class="num" style="color:${s.anomalies_found>0?'#e74c3c':'#27ae60'}">${s.anomalies_found}</div><div class="lbl">Аномалий</div></div>
+          <div class="stat-item"><div class="num" style="color:${s.deviations_found>0?'#f39c12':'#27ae60'}">${s.deviations_found}</div><div class="lbl">Отклонений</div></div>
+        </div>
+        <a class="open-btn" href="${data.report_url}" target="_blank">📊 Открыть отчёт</a>
+      `;
+      loadRecent();
+    } else {
+      el.className = "result error";
+      el.innerHTML = `<h3>❌ Ошибка</h3><p>${data.error || "Неизвестная ошибка"}</p>`;
+    }
+  }
+
+  async function loadRecent() {
+    try {
+      const resp = await fetch("/reports");
+      const items = await resp.json();
+      if (items.length > 0) {
+        document.getElementById("recentSection").style.display = "block";
+        document.getElementById("recentList").innerHTML = items.slice(0,5).map(i =>
+          `<li><a href="${i.url}" target="_blank">📄 ${i.name}</a></li>`
+        ).join("");
+      }
+    } catch(e) {}
+  }
+
+  loadRecent();
+</script>
+</body>
+</html>
