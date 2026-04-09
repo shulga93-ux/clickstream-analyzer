@@ -7,22 +7,21 @@ from jinja2 import Template
 
 
 def generate_report(df: pd.DataFrame, summary: dict, results: dict, output_path: str) -> str:
-    """Generate a full HTML report for the metrics / platform-driver format."""
+    """Generate a full HTML report for СБОЛ.про metrics format."""
     charts = _build_charts(df, results)
     html = _render_html(summary, results, charts)
     Path(output_path).write_text(html, encoding="utf-8")
     return output_path
 
 
-# ---------------------------------------------------------------------------
-# Chart builders
-# ---------------------------------------------------------------------------
+# ─── Chart builders ──────────────────────────────────────────────────────────
 
 def _build_charts(df: pd.DataFrame, results: dict) -> dict:
     charts = {}
     COLORS = px.colors.qualitative.Set2
+    COLORS_SEQ = px.colors.sequential.Blues
 
-    # 1. Daily total val by metric (stacked bar)
+    # 1. Stacked bar: total val by day, stacked by metric_name
     trends = results.get("trends", {})
     ts_by_metric = trends.get("timeseries", {})
     if ts_by_metric:
@@ -36,65 +35,82 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
                 marker_color=COLORS[i % len(COLORS)],
             ))
         fig.update_layout(
-            barmode="group",
-            title="Суммарный val по дням и метрикам",
-            height=360,
+            barmode="stack",
+            title="Динамика ошибок по дням",
+            height=380,
             legend=dict(orientation="h", y=-0.2),
-            margin=dict(l=40, r=20, t=50, b=70),
+            margin=dict(l=40, r=20, t=50, b=80),
             plot_bgcolor="#fafafa",
             paper_bgcolor="#ffffff",
             xaxis_title="Дата",
-            yaxis_title="Сумма val",
+            yaxis_title="Кол-во событий (val)",
         )
         charts["timeline"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 2. Val distribution by category (lvl_1) — pie
-    metric_stats = results.get("metric_stats", {})
-    by_cat = metric_stats.get("by_category", {})
-    if by_cat:
-        fig = go.Figure(go.Pie(
-            labels=list(by_cat.keys()),
-            values=list(by_cat.values()),
-            hole=0.4,
-            textinfo="label+percent",
-            marker=dict(colors=COLORS),
-        ))
-        fig.update_layout(
-            title="Распределение val по категориям (lvl_1)",
-            height=360,
-            margin=dict(l=20, r=20, t=50, b=20),
-        )
-        charts["cat_pie"] = fig.to_html(full_html=False, include_plotlyjs=False)
-
-    # 3. Val by platform — bar
-    by_platform = metric_stats.get("by_platform", {})
-    if by_platform:
-        labels = list(by_platform.keys())
-        values = list(by_platform.values())
+    # 2. WoW deviations — top 15 horizontal bar
+    wow = results.get("wow", [])
+    if wow:
+        top15 = wow[:15]
+        labels = [
+            f"{r.get('metric_name','')[:20]} / {r.get('segment_name', r.get('lvl_1',''))} / {r.get('lvl_2','')[:20]}"
+            for r in top15
+        ]
+        pcts = [r["pct"] for r in top15]
+        colors = ["#e74c3c" if p > 0 else "#3498db" for p in pcts]
         fig = go.Figure(go.Bar(
-            x=labels,
-            y=values,
-            marker_color=COLORS[:len(labels)],
-            text=[f"{v:,}" for v in values],
+            y=labels[::-1],
+            x=pcts[::-1],
+            orientation="h",
+            marker_color=colors[::-1],
+            text=[f"{p:+.0f}%" for p in pcts[::-1]],
             textposition="outside",
         ))
         fig.update_layout(
-            title="Суммарный val по платформам",
-            height=320,
-            margin=dict(l=40, r=20, t=50, b=60),
+            title=f"WoW отклонения (топ-15) — {top15[0]['date_from']} vs {top15[0]['date_to']}",
+            height=max(320, len(top15) * 26),
+            margin=dict(l=250, r=80, t=50, b=20),
             plot_bgcolor="#fafafa",
             paper_bgcolor="#ffffff",
+            xaxis_title="% изменение",
         )
-        charts["platform_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
+        charts["wow_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 4. Top-15 environments by total val (horizontal bar)
-    env_stats = results.get("environment_stats", {})
-    top_envs = env_stats.get("top_environments", {})
-    if top_envs:
-        envs = list(top_envs.keys())[:15]
-        vals = [top_envs[e] for e in envs]
+    # 3. DoD deviations — top 15 horizontal bar
+    dod = results.get("dod", [])
+    if dod:
+        top15 = dod[:15]
+        labels = [
+            f"{r.get('metric_name','')[:20]} / {r.get('segment_name', r.get('lvl_1',''))} / {r.get('lvl_2','')[:20]}"
+            for r in top15
+        ]
+        pcts = [r["pct"] for r in top15]
+        colors = ["#e74c3c" if p > 0 else "#3498db" for p in pcts]
         fig = go.Figure(go.Bar(
-            y=envs[::-1],
+            y=labels[::-1],
+            x=pcts[::-1],
+            orientation="h",
+            marker_color=colors[::-1],
+            text=[f"{p:+.0f}%" for p in pcts[::-1]],
+            textposition="outside",
+        ))
+        fig.update_layout(
+            title=f"DoD отклонения (топ-15) — {top15[0]['date_from']} vs {top15[0]['date_to']}",
+            height=max(320, len(top15) * 26),
+            margin=dict(l=250, r=80, t=50, b=20),
+            plot_bgcolor="#fafafa",
+            paper_bgcolor="#ffffff",
+            xaxis_title="% изменение",
+        )
+        charts["dod_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
+
+    # 4. Top-20 services horizontal bar
+    top_services = results.get("top_services", [])
+    if top_services:
+        top20 = top_services[:20]
+        labels = [r["log_name"] for r in top20]
+        vals = [r["total_val"] for r in top20]
+        fig = go.Figure(go.Bar(
+            y=labels[::-1],
             x=vals[::-1],
             orientation="h",
             marker_color="#4f8ef7",
@@ -102,98 +118,131 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             textposition="outside",
         ))
         fig.update_layout(
-            title="Топ окружений по суммарному val",
-            height=420,
-            margin=dict(l=120, r=80, t=50, b=20),
+            title="Топ-20 сервисов по числу ошибок",
+            height=max(400, len(top20) * 24),
+            margin=dict(l=340, r=100, t=50, b=20),
+            plot_bgcolor="#fafafa",
+            paper_bgcolor="#ffffff",
+            xaxis_title="Суммарный val",
+        )
+        charts["services_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
+
+    # 5. Channel breakdown — stacked bar per channel by day
+    ch_bd = results.get("channel_breakdown", {})
+    by_channel_day = ch_bd.get("by_channel_per_day", {})
+    if by_channel_day:
+        fig = go.Figure()
+        all_dates = sorted({d for v in by_channel_day.values() for d in v.keys()})
+        for i, (ch, day_vals) in enumerate(by_channel_day.items()):
+            y_vals = [day_vals.get(d, 0) for d in all_dates]
+            fig.add_trace(go.Bar(
+                x=all_dates, y=y_vals, name=ch,
+                marker_color=COLORS[i % len(COLORS)],
+            ))
+        fig.update_layout(
+            barmode="stack",
+            title="Динамика по каналам",
+            height=340,
+            legend=dict(orientation="h", y=-0.2),
+            margin=dict(l=40, r=20, t=50, b=80),
             plot_bgcolor="#fafafa",
             paper_bgcolor="#ffffff",
         )
-        charts["env_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
+        charts["channel_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 5. Top-15 workflows by total val (horizontal bar)
-    wf_stats = results.get("workflow_stats", {})
-    top_wf = wf_stats.get("top_workflows", [])
-    if top_wf:
-        labels = [f"{r['lvl_1']} / {r['lvl_2']}" for r in top_wf[:15]]
-        vals = [r["val"] for r in top_wf[:15]]
-        fig = go.Figure(go.Bar(
-            y=labels[::-1],
-            x=vals[::-1],
-            orientation="h",
-            marker_color="#27ae60",
-            text=[f"{v:,}" for v in vals[::-1]],
-            textposition="outside",
+    # 6. Segment pie
+    by_segment = ch_bd.get("by_segment_total", {})
+    if by_segment:
+        fig = go.Figure(go.Pie(
+            labels=list(by_segment.keys()),
+            values=list(by_segment.values()),
+            hole=0.4,
+            textinfo="label+percent",
+            marker=dict(colors=COLORS),
         ))
         fig.update_layout(
-            title="Топ workflow по суммарному val",
-            height=440,
-            margin=dict(l=200, r=80, t=50, b=20),
-            plot_bgcolor="#fafafa",
-            paper_bgcolor="#ffffff",
+            title="Распределение по сегментам (lvl_1)",
+            height=320,
+            margin=dict(l=20, r=20, t=50, b=20),
         )
-        charts["wf_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
+        charts["segment_pie"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 6. Day-over-day deviations scatter (% change)
-    deviations = results.get("deviations", [])
-    if deviations:
-        dev_df = pd.DataFrame(deviations[:50])
-        colors = ["#e74c3c" if d == "spike" else "#3498db" for d in dev_df["direction"]]
-        labels = dev_df["workflow"] + " / " + dev_df["environment"]
-        fig = go.Figure(go.Bar(
-            x=dev_df["pct"],
-            y=labels,
-            orientation="h",
-            marker_color=colors,
-            text=[f"{p:+.0f}%" for p in dev_df["pct"]],
-            textposition="outside",
+    # 7. Status screen pie (55558 by lvl_4)
+    ss = results.get("status_screen", {})
+    ss_total = ss.get("total", {})
+    if ss_total:
+        fig = go.Figure(go.Pie(
+            labels=list(ss_total.keys()),
+            values=list(ss_total.values()),
+            hole=0.35,
+            textinfo="label+percent+value",
+            marker=dict(colors=px.colors.qualitative.Pastel),
         ))
         fig.update_layout(
-            title="Топ отклонений день к дню (% изменение val)",
-            height=max(350, len(dev_df) * 22),
-            margin=dict(l=220, r=80, t=50, b=20),
+            title="Статусный экран (55558): разбивка по типу",
+            height=340,
+            margin=dict(l=20, r=20, t=50, b=20),
+        )
+        charts["status_pie"] = fig.to_html(full_html=False, include_plotlyjs=False)
+
+    # 8. Trends per metric (line chart)
+    if ts_by_metric:
+        fig = go.Figure()
+        for i, (metric, records) in enumerate(ts_by_metric.items()):
+            ts_df = pd.DataFrame(records)
+            fig.add_trace(go.Scatter(
+                x=ts_df["date"].astype(str),
+                y=ts_df["val"],
+                name=metric,
+                mode="lines+markers",
+                line=dict(color=COLORS[i % len(COLORS)], width=2),
+            ))
+        fig.update_layout(
+            title="Тренды по типам ошибок",
+            height=340,
+            legend=dict(orientation="h", y=-0.2),
+            margin=dict(l=40, r=20, t=50, b=80),
             plot_bgcolor="#fafafa",
             paper_bgcolor="#ffffff",
-            xaxis_title="% изменение",
         )
-        charts["deviations_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
+        charts["trend_lines"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
     return charts
 
 
-# ---------------------------------------------------------------------------
-# HTML rendering
-# ---------------------------------------------------------------------------
+# ─── HTML rendering ──────────────────────────────────────────────────────────
 
 def _render_html(summary: dict, results: dict, charts: dict) -> str:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     anomalies = results.get("anomalies", [])
-    deviations = results.get("deviations", [])
-    wf_anom = results.get("workflow_anomalies", {})
+    wow = results.get("wow", [])
+    dod = results.get("dod", [])
     trends = results.get("trends", {})
+    top_services = results.get("top_services", [])
+    ss = results.get("status_screen", {})
 
     template = Template(HTML_TEMPLATE)
     return template.render(
         generated_at=generated_at,
         summary=summary,
         anomalies=anomalies,
-        deviations=deviations,
-        wf_anom=wf_anom,
+        wow=wow,
+        dod=dod,
         trends=trends,
+        top_services=top_services,
+        ss=ss,
         charts=charts,
     )
 
 
-# ---------------------------------------------------------------------------
-# HTML Template
-# ---------------------------------------------------------------------------
+# ─── HTML Template ────────────────────────────────────────────────────────────
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Platform Driver — Anomaly Report</title>
+  <title>СБОЛ.про — Анализ ошибок</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -202,60 +251,54 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
               color: white; padding: 40px; }
     .header h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
-    .header .meta { opacity: 0.7; font-size: 0.9rem; }
+    .header .meta { opacity: 0.75; font-size: 0.9rem; }
     .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
-    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-                gap: 16px; margin-bottom: 24px; }
-    .kpi-card { background: white; border-radius: 12px; padding: 20px;
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+                gap: 14px; margin-bottom: 24px; }
+    .kpi-card { background: white; border-radius: 12px; padding: 18px;
                 box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; }
-    .kpi-card .value { font-size: 1.8rem; font-weight: 700; color: #4f8ef7; }
-    .kpi-card .label { font-size: 0.78rem; color: #888; text-transform: uppercase;
+    .kpi-card .value { font-size: 1.75rem; font-weight: 700; color: #4f8ef7; }
+    .kpi-card .label { font-size: 0.76rem; color: #888; text-transform: uppercase;
                        letter-spacing: 0.5px; margin-top: 4px; }
     .section { background: white; border-radius: 12px; padding: 24px;
                margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .section h2 { font-size: 1.15rem; font-weight: 600; margin-bottom: 16px;
+    .section h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px;
                   padding-bottom: 10px; border-bottom: 2px solid #f0f2f5; }
-    .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
     .chart-card { background: white; border-radius: 12px; padding: 16px;
-                  box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .chart-full { grid-column: 1 / -1; }
+                  box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; }
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-    .alert-list { list-style: none; }
-    .alert-item { padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid; }
-    .alert-high   { background: #fff5f5; border-color: #e74c3c; }
-    .alert-medium { background: #fffbf0; border-color: #f39c12; }
-    .alert-info   { background: #f0f8ff; border-color: #3498db; }
-    .alert-item .ts   { font-size: 0.78rem; color: #888; }
-    .alert-item .desc { font-weight: 500; margin-top: 2px; font-size: 0.88rem; }
-    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px;
+    .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .stat-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    .stat-table th { text-align: left; padding: 8px 10px; background: #f8f9fa;
+                     font-size: 0.76rem; text-transform: uppercase; color: #888; }
+    .stat-table td { padding: 7px 10px; border-bottom: 1px solid #f0f2f5; }
+    .stat-table tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
              font-size: 0.72rem; font-weight: 600; }
     .badge-red    { background: #ffe0e0; color: #c0392b; }
     .badge-orange { background: #fff3cd; color: #d68910; }
     .badge-green  { background: #e0f7ea; color: #1e8449; }
     .badge-blue   { background: #e0f0ff; color: #2471a3; }
-    .stat-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-    .stat-table th { text-align: left; padding: 8px 12px; background: #f8f9fa;
-                     font-size: 0.78rem; text-transform: uppercase; color: #888; }
-    .stat-table td { padding: 8px 12px; border-bottom: 1px solid #f0f2f5; }
-    .stat-table tr:last-child td { border-bottom: none; }
+    .deviation-row { padding: 8px 10px; border-radius: 6px; margin-bottom: 6px;
+                     border-left: 3px solid; font-size: 0.84rem; }
+    .dev-spike { background: #fff5f5; border-color: #e74c3c; }
+    .dev-drop  { background: #f0f8ff; border-color: #3498db; }
     .trend-row { display: flex; align-items: center; gap: 12px; padding: 8px 0;
                  border-bottom: 1px solid #f0f2f5; }
     .trend-row:last-child { border-bottom: none; }
-    .trend-badge { font-size: 1rem; font-weight: 700; min-width: 24px; }
     .empty-state { text-align: center; padding: 24px; color: #aaa; }
-    .footer { text-align: center; padding: 30px; color: #aaa; font-size: 0.85rem; }
-    @media (max-width: 768px) {
-      .charts-grid, .two-col { grid-template-columns: 1fr; }
+    .footer { text-align: center; padding: 28px; color: #aaa; font-size: 0.85rem; }
+    @media (max-width: 900px) {
+      .two-col, .three-col { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
 
 <div class="header">
-  <h1>📊 Platform Driver — Anomaly Report</h1>
+  <h1>📊 СБОЛ.про — Анализ ошибок</h1>
   <div class="meta">
     Период: {{ summary.date_range.start }} → {{ summary.date_range.end }}
-    &nbsp;·&nbsp; Метрики: {{ summary.metrics | join(", ") }}
     &nbsp;·&nbsp; Сгенерирован: {{ generated_at }}
   </div>
 </div>
@@ -277,101 +320,184 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <div class="label">Дней в периоде</div>
     </div>
     <div class="kpi-card">
-      <div class="value">{{ summary.unique_metrics }}</div>
-      <div class="label">Метрик</div>
+      <div class="value">{{ summary.unique_products }}</div>
+      <div class="label">Продуктов (lvl_2)</div>
     </div>
     <div class="kpi-card">
-      <div class="value">{{ summary.unique_workflows }}</div>
-      <div class="label">Workflow</div>
-    </div>
-    <div class="kpi-card">
-      <div class="value">{{ summary.unique_environments }}</div>
-      <div class="label">Окружений</div>
+      <div class="value">{{ summary.unique_services }}</div>
+      <div class="label">Сервисов (log_name)</div>
     </div>
     <div class="kpi-card">
       <div class="value" style="color: #e74c3c;">{{ anomalies | length }}</div>
-      <div class="label">Выбросов val</div>
+      <div class="label">Аномалий (IQR×3)</div>
     </div>
     <div class="kpi-card">
-      <div class="value" style="color: #f39c12;">{{ deviations | length }}</div>
-      <div class="label">Отклонений день к дню</div>
+      <div class="value" style="color: #f39c12;">{{ wow | length }}</div>
+      <div class="label">WoW отклонений</div>
+    </div>
+    <div class="kpi-card">
+      <div class="value" style="color: #e67e22;">{{ dod | length }}</div>
+      <div class="label">DoD отклонений</div>
     </div>
   </div>
 
   <!-- Timeline chart -->
   {% if charts.timeline %}
-  <div class="chart-card" style="margin-bottom: 20px;">
-    {{ charts.timeline }}
+  <div class="chart-card">{{ charts.timeline }}</div>
+  {% endif %}
+
+  <!-- WoW & DoD side by side -->
+  <div class="two-col">
+    <!-- WoW -->
+    <div class="section">
+      <h2>📅 WoW отклонения (неделя к неделе) — {{ wow | length }}</h2>
+      {% if charts.wow_bar %}
+        {{ charts.wow_bar }}
+      {% elif wow %}
+        {% for d in wow[:15] %}
+        <div class="deviation-row {{ 'dev-spike' if d.direction == 'spike' else 'dev-drop' }}">
+          <strong>{{ d.get('metric_name','') }}</strong> /
+          {{ d.get('segment_name', d.get('lvl_1','')) }} / {{ d.get('lvl_2','') }}
+          <br>
+          <span style="font-size:0.78rem;color:#888;">{{ d.date_from }} → {{ d.date_to }} · блок: {{ d.get('block_type','') }}</span>
+          <br>
+          {{ d.val_prev }} → <strong>{{ d.val_curr }}</strong>
+          <span style="color:{{ '#e74c3c' if d.direction=='spike' else '#3498db' }};font-weight:700;">
+            {{ '+' if d.pct > 0 else '' }}{{ d.pct }}%
+          </span>
+        </div>
+        {% endfor %}
+        {% if wow | length > 15 %}
+        <div style="color:#888;font-size:0.82rem;padding:8px;">... и ещё {{ wow | length - 15 }}</div>
+        {% endif %}
+      {% else %}
+        <div class="empty-state">✅ WoW отклонений нет (нет данных за -7 дней или ниже порога)</div>
+      {% endif %}
+    </div>
+
+    <!-- DoD -->
+    <div class="section">
+      <h2>📆 DoD отклонения (день к дню) — {{ dod | length }}</h2>
+      {% if charts.dod_bar %}
+        {{ charts.dod_bar }}
+      {% elif dod %}
+        {% for d in dod[:15] %}
+        <div class="deviation-row {{ 'dev-spike' if d.direction == 'spike' else 'dev-drop' }}">
+          <strong>{{ d.get('metric_name','') }}</strong> /
+          {{ d.get('segment_name', d.get('lvl_1','')) }} / {{ d.get('lvl_2','') }}
+          <br>
+          <span style="font-size:0.78rem;color:#888;">{{ d.date_from }} → {{ d.date_to }} · блок: {{ d.get('block_type','') }}</span>
+          <br>
+          {{ d.val_prev }} → <strong>{{ d.val_curr }}</strong>
+          <span style="color:{{ '#e74c3c' if d.direction=='spike' else '#3498db' }};font-weight:700;">
+            {{ '+' if d.pct > 0 else '' }}{{ d.pct }}%
+          </span>
+        </div>
+        {% endfor %}
+        {% if dod | length > 15 %}
+        <div style="color:#888;font-size:0.82rem;padding:8px;">... и ещё {{ dod | length - 15 }}</div>
+        {% endif %}
+      {% else %}
+        <div class="empty-state">✅ DoD отклонений нет (ниже порога >50%)</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Top-20 services -->
+  {% if charts.services_bar %}
+  <div class="chart-card">{{ charts.services_bar }}</div>
+  {% endif %}
+
+  <!-- Channel & Segment breakdown -->
+  <div class="two-col">
+    {% if charts.channel_bar %}
+    <div class="chart-card">{{ charts.channel_bar }}</div>
+    {% endif %}
+    {% if charts.segment_pie %}
+    <div class="chart-card">{{ charts.segment_pie }}</div>
+    {% endif %}
+  </div>
+
+  <!-- Status Screen 55558 -->
+  {% if ss and ss.total_val > 0 %}
+  <div class="section">
+    <h2>🖥️ Статусный экран (metric_id=55558) — итого val: {{ "{:,}".format(ss.total_val) }}</h2>
+    <div class="two-col" style="margin-bottom:0;">
+      {% if charts.status_pie %}
+      <div>{{ charts.status_pie }}</div>
+      {% endif %}
+      <div>
+        <table class="stat-table">
+          <tr><th>Тип (lvl_4)</th><th>Σ val</th><th>%</th></tr>
+          {% set total_ss = ss.total_val %}
+          {% for typ, v in ss.total.items() %}
+          <tr>
+            <td>{{ typ }}</td>
+            <td><strong>{{ "{:,}".format(v) }}</strong></td>
+            <td>{{ "%.1f"|format(v / total_ss * 100) if total_ss > 0 else 0 }}%</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+    </div>
   </div>
   {% endif %}
 
-  <!-- Anomalies + Deviations -->
-  <div class="two-col">
-    <div class="section">
-      <h2>⚡ Выбросы val ({{ anomalies | length }})</h2>
-      {% if anomalies %}
-      <ul class="alert-list">
-        {% for a in anomalies[:10] %}
-        <li class="alert-item {{ 'alert-high' if a.severity == 'high' else 'alert-medium' }}">
-          <div class="ts">{{ a.timestamp }} · {{ a.metric_name }}</div>
-          <div class="desc">{{ a.description }}</div>
+  <!-- Anomalies table -->
+  <div class="section">
+    <h2>⚡ Аномальные значения (IQR×3) — {{ anomalies | length }}</h2>
+    {% if anomalies %}
+    <table class="stat-table">
+      <tr>
+        <th>Дата</th><th>Метрика</th><th>Канал</th><th>Сегмент</th>
+        <th>Продукт</th><th>Блок</th><th>val</th><th>Порог</th><th>Z</th><th>Уровень</th>
+      </tr>
+      {% for a in anomalies[:30] %}
+      <tr>
+        <td>{{ a.timestamp }}</td>
+        <td>{{ a.metric_name }}</td>
+        <td>{{ a.channel_name }}</td>
+        <td>{{ a.segment_name }}</td>
+        <td>{{ a.lvl_2 }}</td>
+        <td>{{ a.block_type }}</td>
+        <td><strong>{{ "{:,}".format(a.val) }}</strong></td>
+        <td>{{ "{:,.0f}".format(a.threshold) }}</td>
+        <td>{{ a.zscore }}</td>
+        <td>
           <span class="badge {{ 'badge-red' if a.severity == 'high' else 'badge-orange' }}">
             {{ a.severity }}
           </span>
-          <span class="badge badge-blue">z={{ a.zscore }}</span>
-        </li>
-        {% endfor %}
-        {% if anomalies | length > 10 %}
-        <li style="padding: 8px; color: #888;">... и ещё {{ anomalies | length - 10 }} выбросов</li>
-        {% endif %}
-      </ul>
-      {% else %}
-      <div class="empty-state">✅ Выбросов не обнаружено</div>
-      {% endif %}
-    </div>
-
-    <div class="section">
-      <h2>📐 Отклонения день к дню ({{ deviations | length }})</h2>
-      {% if deviations %}
-      <ul class="alert-list">
-        {% for d in deviations[:10] %}
-        <li class="alert-item {{ 'alert-high' if d.pct | abs > 200 else 'alert-medium' }}">
-          <div class="ts">{{ d.date_from }} → {{ d.date_to }} · {{ d.metric_name }}</div>
-          <div class="desc">
-            {{ d.category }} / {{ d.workflow }} / {{ d.environment }}:
-            {{ d.val_prev }} → <strong>{{ d.val_curr }}</strong>
-            (<span style="color: {{ '#e74c3c' if d.direction == 'spike' else '#3498db' }}">
-              {{ '+' if d.pct > 0 else '' }}{{ d.pct }}%
-            </span>)
-          </div>
-        </li>
-        {% endfor %}
-        {% if deviations | length > 10 %}
-        <li style="padding: 8px; color: #888;">... и ещё {{ deviations | length - 10 }}</li>
-        {% endif %}
-      </ul>
-      {% else %}
-      <div class="empty-state">✅ Значимых отклонений нет</div>
-      {% endif %}
-    </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% if anomalies | length > 30 %}
+    <div style="color:#888;font-size:0.82rem;padding:10px;">... и ещё {{ anomalies | length - 30 }} записей</div>
+    {% endif %}
+    {% else %}
+    <div class="empty-state">✅ Аномалий не обнаружено</div>
+    {% endif %}
   </div>
 
-  <!-- Trend per metric -->
+  <!-- Trends -->
   <div class="section">
     <h2>📈 Тренды по метрикам</h2>
+    {% if charts.trend_lines %}
+    {{ charts.trend_lines }}
+    {% endif %}
     {% set per_metric = trends.get("per_metric", {}) %}
     {% if per_metric %}
     {% for metric, t in per_metric.items() %}
     <div class="trend-row">
-      <div class="trend-badge">
+      <div style="font-size:1.1rem;">
         {{ "📈" if t.direction == "growing" else ("📉" if t.direction == "declining" else "➡️") }}
       </div>
-      <div style="flex: 1;">
+      <div style="flex:1;">
         <strong>{{ metric }}</strong>
         <span class="badge {{ 'badge-red' if t.direction == 'declining' else ('badge-green' if t.direction == 'growing' else 'badge-blue') }}"
-              style="margin-left: 8px;">{{ t.direction }}</span>
+              style="margin-left:8px;">{{ t.direction }}</span>
       </div>
-      <div style="font-size: 0.85rem; color: #555;">{{ t.description }}</div>
+      <div style="font-size:0.84rem;color:#555;">{{ t.description }}</div>
     </div>
     {% endfor %}
     {% else %}
@@ -379,77 +505,25 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endif %}
   </div>
 
-  <!-- Charts -->
-  <div class="charts-grid">
-    {% if charts.cat_pie %}
-    <div class="chart-card">{{ charts.cat_pie }}</div>
-    {% endif %}
-    {% if charts.platform_bar %}
-    <div class="chart-card">{{ charts.platform_bar }}</div>
-    {% endif %}
-    {% if charts.env_bar %}
-    <div class="chart-card chart-full">{{ charts.env_bar }}</div>
-    {% endif %}
-    {% if charts.wf_bar %}
-    <div class="chart-card chart-full">{{ charts.wf_bar }}</div>
-    {% endif %}
-    {% if charts.deviations_bar %}
-    <div class="chart-card chart-full">{{ charts.deviations_bar }}</div>
-    {% endif %}
-  </div>
-
-  <!-- Anomalous Workflows -->
-  <div class="two-col">
-    <div class="section">
-      <h2>🔍 Аномальные workflow ({{ wf_anom.get("anomalous_count", 0) }} из {{ wf_anom.get("total_workflows", 0) }})</h2>
-      {% set wf_list = wf_anom.get("anomalous_workflows", []) %}
-      {% if wf_list %}
-      <table class="stat-table">
-        <tr>
-          <th>Метрика</th><th>Кат.</th><th>Workflow</th>
-          <th>Σ val</th><th>Z-score</th>
-        </tr>
-        {% for w in wf_list[:12] %}
-        <tr>
-          <td>{{ w.metric_name }}</td>
-          <td>{{ w.category }}</td>
-          <td><strong>{{ w.workflow }}</strong></td>
-          <td>{{ "{:,}".format(w.total_val) }}</td>
-          <td>
-            <span class="badge {{ 'badge-red' if w.zscore | abs > 3.5 else 'badge-orange' }}">
-              {{ w.zscore }}
-            </span>
-          </td>
-        </tr>
-        {% endfor %}
-      </table>
-      {% else %}
-      <div class="empty-state">✅ Аномальных workflow нет</div>
-      {% endif %}
-    </div>
-
-    <!-- Val by metric summary -->
-    <div class="section">
-      <h2>📋 Суммарный val по метрикам</h2>
-      {% set by_metric = results_metric_by_metric | default({}) %}
-      <table class="stat-table">
-        <tr><th>Метрика</th><th>Σ val</th></tr>
-        {% for name, v in summary.val_by_metric.items() %}
-        <tr>
-          <td>{{ name }}</td>
-          <td><strong>{{ "{:,}".format(v) }}</strong></td>
-        </tr>
-        {% endfor %}
-      </table>
-      <div style="margin-top: 16px;">
-        <div style="font-size: 0.8rem; color: #888; text-transform: uppercase; margin-bottom: 8px;">По датам</div>
-        {% for date, v in summary.val_by_date.items() %}
-        <div style="display: flex; justify-content: space-between; padding: 4px 0;
-                    border-bottom: 1px solid #f0f2f5; font-size: 0.88rem;">
-          <span>{{ date }}</span>
-          <strong>{{ "{:,}".format(v) }}</strong>
-        </div>
-        {% endfor %}
+  <!-- Val by date summary -->
+  <div class="section">
+    <h2>📋 Суммарный val по дням и метрикам</h2>
+    <div class="two-col" style="margin-bottom:0;">
+      <div>
+        <table class="stat-table">
+          <tr><th>Дата</th><th>Σ val</th></tr>
+          {% for date, v in summary.val_by_date.items() %}
+          <tr><td>{{ date }}</td><td><strong>{{ "{:,}".format(v) }}</strong></td></tr>
+          {% endfor %}
+        </table>
+      </div>
+      <div>
+        <table class="stat-table">
+          <tr><th>Метрика</th><th>Σ val</th></tr>
+          {% for name, v in summary.val_by_metric.items() %}
+          <tr><td>{{ name }}</td><td><strong>{{ "{:,}".format(v) }}</strong></td></tr>
+          {% endfor %}
+        </table>
       </div>
     </div>
   </div>
@@ -457,7 +531,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </div>
 
 <div class="footer">
-  Platform Driver Analyzer · Сгенерировано {{ generated_at }}
+  СБОЛ.про Analyzer · Сгенерировано {{ generated_at }}
 </div>
 
 </body>

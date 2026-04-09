@@ -8,12 +8,13 @@ except ImportError:
     _HAS_SCIPY = False
 
 
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
 def _linregress(x, y):
     """Minimal linear regression: returns slope, intercept, r2, p_value."""
     if _HAS_SCIPY:
         res = _scipy_stats.linregress(x, y)
         return res.slope, res.intercept, res.rvalue ** 2, res.pvalue
-    # Pure numpy fallback
     n = len(x)
     x = np.array(x, dtype=float)
     y = np.array(y, dtype=float)
@@ -28,38 +29,53 @@ def _linregress(x, y):
     ss_res = ((y - y_pred) ** 2).sum()
     ss_tot = ((y - y_mean) ** 2).sum()
     r2 = 1 - ss_res / ss_tot if ss_tot != 0 else 0.0
-    # Approximate p-value via t-distribution (2-tailed)
     se = np.sqrt(ss_res / max(n - 2, 1) / ss_xx) if ss_xx > 0 else 0
     t_stat = slope / se if se > 0 else 0
-    # rough p-value: small t → large p
     p_value = 2 * (1 - min(abs(t_stat) / (abs(t_stat) + n), 1))
     return slope, intercept, r2, p_value
 
 
+def _trend_description(direction, slope, r2, p_value, pct_change) -> str:
+    sig = "значимо" if p_value < 0.05 else "незначимо"
+    arrows = {"growing": "↑", "declining": "↓", "stable": "→"}
+    arrow = arrows.get(direction, "")
+    if direction == "stable":
+        return f"{arrow} Стабильно (R²={r2:.2f}, {sig})"
+    sign = "+" if pct_change > 0 else ""
+    return f"{arrow} {sign}{pct_change:.1f}% за период (slope={slope:+.1f}, R²={r2:.2f}, {sig})"
+
+
+# ─── Группировочные колонки ──────────────────────────────────────────────────
+
+_GROUP_COLS = [
+    "metric_id", "metric_name", "channel_name",
+    "lvl_1", "segment_name", "lvl_2", "lvl_3", "block_type",
+]
+
+
+# ─── Main entry point ────────────────────────────────────────────────────────
+
 def detect_all(df: pd.DataFrame) -> dict:
-    """Run all detection algorithms and return results."""
+    """Run all detection algorithms and return results dict."""
     results = {}
     results["anomalies"] = detect_value_anomalies(df)
     results["trends"] = detect_trends(df)
-    results["deviations"] = detect_day_over_day(df)
-    results["workflow_anomalies"] = detect_workflow_anomalies(df)
-    results["environment_stats"] = environment_analysis(df)
-    results["metric_stats"] = metric_analysis(df)
-    results["workflow_stats"] = workflow_analysis(df)
+    results["dod"] = detect_dod(df)
+    results["wow"] = detect_wow(df)
+    results["top_services"] = detect_top_services(df)
+    results["channel_breakdown"] = detect_channel_breakdown(df)
+    results["status_screen"] = detect_status_screen(df)
+    # backward-compat aliases
+    results["deviations"] = results["dod"]
     return results
 
 
-# ---------------------------------------------------------------------------
-# 1. Outlier detection on raw val (IQR × 3 fence, applied per metric)
-# ---------------------------------------------------------------------------
+# ─── 1. Value anomalies: IQR×3 per (metric_id, lvl_1, lvl_2) ────────────────
 
 def detect_value_anomalies(df: pd.DataFrame) -> list:
-    """
-    Flag rows where val is a statistical outlier within its metric group.
-    Uses the 3×IQR fence (same threshold validated in the analysis session).
-    """
+    """Flag rows where val is a statistical outlier within its group (IQR×3)."""
     result = []
-    for metric_id, grp in df.groupby("metric_id"):
+    for (metric_id, lvl1, lvl2), grp in df.groupby(["metric_id", "lvl_1", "lvl_2"]):
         q1 = grp["val"].quantile(0.25)
         q3 = grp["val"].quantile(0.75)
         iqr = q3 - q1
@@ -67,42 +83,40 @@ def detect_value_anomalies(df: pd.DataFrame) -> list:
             continue
         upper = q3 + 3 * iqr
         outliers = grp[grp["val"] > upper].copy()
+        mean_val = grp["val"].mean()
+        std_val = grp["val"].std()
 
         for _, row in outliers.iterrows():
-            z = (row["val"] - grp["val"].mean()) / grp["val"].std()
+            z = (row["val"] - mean_val) / std_val if std_val > 0 else 0
+            metric_name = str(row.get("metric_name", row["metric_id"]))
             result.append({
                 "timestamp": str(row["report_dt"].date()),
                 "metric_id": str(row["metric_id"]),
-                "metric_name": str(row.get("metric_name", row["metric_id"])),
-                "platform": str(row["event_category_name"]),
-                "category": str(row["lvl_1"]),
-                "workflow": str(row["lvl_2"]),
-                "environment": str(row["lvl_3"]),
+                "metric_name": metric_name,
+                "channel_name": str(row.get("channel_name", row.get("event_category_name", ""))),
+                "segment_name": str(row.get("segment_name", row["lvl_1"])),
+                "lvl_1": str(row["lvl_1"]),
+                "lvl_2": str(row["lvl_2"]),
+                "lvl_3": str(row["lvl_3"]),
+                "block_type": str(row.get("block_type", "")),
                 "val": int(row["val"]),
                 "threshold": round(float(upper), 0),
                 "zscore": round(float(z), 2) if not np.isnan(z) else 0,
                 "severity": "high" if row["val"] > upper * 2 else "medium",
                 "description": (
-                    f"{row.get('metric_name', row['metric_id'])} / "
-                    f"{row['lvl_1']} / {row['lvl_2']} / {row['lvl_3']}: "
-                    f"val={int(row['val'])} (порог {upper:.0f}, z={z:.1f})"
+                    f"{metric_name} / {row['lvl_1']} / {row['lvl_2']}: "
+                    f"val={int(row['val'])} (порог {upper:.0f})"
                 ),
             })
 
-    # Sort by val descending
     result.sort(key=lambda x: x["val"], reverse=True)
     return result
 
 
-# ---------------------------------------------------------------------------
-# 2. Day-over-day trend per metric
-# ---------------------------------------------------------------------------
+# ─── 2. Trends: linear regression per metric_name ────────────────────────────
 
 def detect_trends(df: pd.DataFrame) -> dict:
-    """
-    Compute daily totals per metric_name and fit a linear trend.
-    Returns per-metric trend summaries + a combined timeseries for charting.
-    """
+    """Compute daily totals per metric_name and fit a linear trend."""
     df2 = df.copy()
     df2["date"] = df2["report_dt"].dt.date
     daily = df2.groupby(["date", "metric_name"])["val"].sum().reset_index()
@@ -118,7 +132,9 @@ def detect_trends(df: pd.DataFrame) -> dict:
         if len(y) < 2:
             trends[metric] = {"direction": "insufficient_data", "slope": 0, "r2": 0,
                               "description": "Недостаточно данных"}
-            timeseries[metric] = grp[["date", "val"]].to_dict("records")
+            ts_records = grp[["date", "val"]].copy()
+            ts_records["date"] = ts_records["date"].astype(str)
+            timeseries[metric] = ts_records.to_dict("records")
             continue
 
         slope, intercept, r2, p_value = _linregress(x, y)
@@ -146,7 +162,6 @@ def detect_trends(df: pd.DataFrame) -> dict:
         ts_records["date"] = ts_records["date"].astype(str)
         timeseries[metric] = ts_records.to_dict("records")
 
-    # Combined daily total across all metrics
     combined = df2.groupby("date")["val"].sum().reset_index()
     combined["date"] = combined["date"].astype(str)
 
@@ -157,198 +172,206 @@ def detect_trends(df: pd.DataFrame) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# 3. Day-over-day deviations per (metric, lvl_1, lvl_2, lvl_3)
-# ---------------------------------------------------------------------------
+# ─── 3. DoD: last date vs D-1 ────────────────────────────────────────────────
 
-def detect_day_over_day(df: pd.DataFrame) -> list:
-    """
-    For each combination (metric_id, lvl_1, lvl_2, lvl_3) compare consecutive days.
-    Flags changes > ±80 % or absolute jumps that are outliers.
+def detect_dod(df: pd.DataFrame) -> list:
+    """Compare last date vs D-1 across all group dimensions.
+    Threshold: |pct| > 50 and |delta| > 5, sorted by |delta| desc.
     """
     df2 = df.copy()
     df2["date"] = df2["report_dt"].dt.date
-
-    key_cols = ["metric_id", "metric_name", "event_category_name", "lvl_1", "lvl_2", "lvl_3"]
-    pivot = (
-        df2.groupby(key_cols + ["date"])["val"]
-        .sum()
-        .reset_index()
-        .pivot_table(index=key_cols, columns="date", values="val")
-        .reset_index()
-    )
-    pivot.columns.name = None
     dates = sorted(df2["date"].unique())
 
-    deviations = []
-    for i in range(1, len(dates)):
-        d_prev, d_curr = dates[i - 1], dates[i]
-        if d_prev not in pivot.columns or d_curr not in pivot.columns:
-            continue
+    if len(dates) < 2:
+        return []
 
-        sub = pivot[[*key_cols, d_prev, d_curr]].dropna(subset=[d_prev, d_curr])
-        sub = sub[sub[d_prev] > 0].copy()
-        sub["pct"] = (sub[d_curr] - sub[d_prev]) / sub[d_prev] * 100
-        sub["delta"] = sub[d_curr] - sub[d_prev]
+    d_curr = dates[-1]
+    d_prev = dates[-2]
 
-        # Flag > ±80 % change with non-trivial absolute delta
-        flagged = sub[sub["pct"].abs() > 80].copy()
-        # Also require delta to be meaningful (> 10)
-        flagged = flagged[flagged["delta"].abs() > 10]
+    # ensure all group cols are present
+    available_cols = [c for c in _GROUP_COLS if c in df2.columns]
+    grp_cols = available_cols
 
-        for _, row in flagged.iterrows():
-            deviations.append({
-                "date_from": str(d_prev),
-                "date_to": str(d_curr),
-                "metric_name": str(row["metric_name"]),
-                "platform": str(row["event_category_name"]),
-                "category": str(row["lvl_1"]),
-                "workflow": str(row["lvl_2"]),
-                "environment": str(row["lvl_3"]),
-                "val_prev": int(row[d_prev]),
-                "val_curr": int(row[d_curr]),
-                "delta": int(row["delta"]),
-                "pct": round(float(row["pct"]), 1),
-                "direction": "spike" if row["pct"] > 0 else "drop",
-            })
+    curr = df2[df2["date"] == d_curr].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_curr"})
+    prev = df2[df2["date"] == d_prev].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_prev"})
 
-    deviations.sort(key=lambda x: abs(x["pct"]), reverse=True)
-    return deviations
+    merged = curr.merge(prev, on=grp_cols, how="outer").fillna(0)
+    merged["val_curr"] = merged["val_curr"].astype(int)
+    merged["val_prev"] = merged["val_prev"].astype(int)
+
+    merged = merged[merged["val_prev"] > 0].copy()
+    merged["delta"] = merged["val_curr"] - merged["val_prev"]
+    merged["pct"] = (merged["delta"] / merged["val_prev"] * 100).round(1)
+
+    flagged = merged[(merged["pct"].abs() > 50) & (merged["delta"].abs() > 5)].copy()
+    flagged = flagged.sort_values("delta", key=abs, ascending=False)
+
+    result = []
+    for _, row in flagged.iterrows():
+        r = {
+            "date_from": str(d_prev),
+            "date_to": str(d_curr),
+            "direction": "spike" if row["delta"] > 0 else "drop",
+            "delta": int(row["delta"]),
+            "pct": float(row["pct"]),
+            "val_prev": int(row["val_prev"]),
+            "val_curr": int(row["val_curr"]),
+        }
+        for col in grp_cols:
+            r[col] = str(row[col]) if col in row else ""
+        result.append(r)
+
+    return result
 
 
-# ---------------------------------------------------------------------------
-# 4. Workflow-level anomaly detection (Isolation Forest style via Z-score)
-# ---------------------------------------------------------------------------
+# ─── 4. WoW: last date vs D-7 ────────────────────────────────────────────────
 
-def detect_workflow_anomalies(df: pd.DataFrame) -> dict:
+def detect_wow(df: pd.DataFrame) -> list:
+    """Compare last date vs D-7 (same weekday last week).
+    Threshold: |pct| > 30 and |delta| > 5, sorted by |delta| desc.
     """
-    For each (metric_id, lvl_1, lvl_2) compute total val across all dates/envs.
-    Flag workflows whose total val is a Z-score outlier (|z| > 2.5).
-    """
+    import datetime as _dt
+
     df2 = df.copy()
-    wf_stats = (
-        df2.groupby(["metric_id", "metric_name", "lvl_1", "lvl_2"])
-        .agg(
-            total_val=("val", "sum"),
-            mean_val=("val", "mean"),
-            max_val=("val", "max"),
-            n_records=("val", "count"),
-            n_envs=("lvl_3", "nunique"),
-            n_dates=("report_dt", "nunique"),
-        )
-        .reset_index()
-    )
+    df2["date"] = df2["report_dt"].dt.date
+    dates_set = set(df2["date"].unique())
+    dates = sorted(dates_set)
 
-    anomalous = []
-    for metric, grp in wf_stats.groupby("metric_id"):
-        if len(grp) < 3:
-            continue
-        mean = grp["total_val"].mean()
-        std = grp["total_val"].std()
-        if std == 0:
-            continue
-        grp = grp.copy()
-        grp["zscore"] = (grp["total_val"] - mean) / std
-        flagged = grp[grp["zscore"].abs() > 2.5]
-        for _, row in flagged.iterrows():
-            anomalous.append({
-                "metric_name": str(row["metric_name"]),
-                "category": str(row["lvl_1"]),
-                "workflow": str(row["lvl_2"]),
-                "total_val": int(row["total_val"]),
-                "mean_val": round(float(row["mean_val"]), 1),
-                "max_val": int(row["max_val"]),
-                "n_envs": int(row["n_envs"]),
-                "n_dates": int(row["n_dates"]),
-                "zscore": round(float(row["zscore"]), 2),
-            })
+    if not dates:
+        return []
 
-    anomalous.sort(key=lambda x: abs(x["zscore"]), reverse=True)
+    d_curr = dates[-1]
+    d_prev = d_curr - _dt.timedelta(days=7)
 
-    return {
-        "anomalous_workflows": anomalous,
-        "total_workflows": int(len(wf_stats)),
-        "anomalous_count": len(anomalous),
-    }
+    if d_prev not in dates_set:
+        return []
 
+    available_cols = [c for c in _GROUP_COLS if c in df2.columns]
+    grp_cols = available_cols
 
-# ---------------------------------------------------------------------------
-# 5. Environment analysis
-# ---------------------------------------------------------------------------
+    curr = df2[df2["date"] == d_curr].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_curr"})
+    prev = df2[df2["date"] == d_prev].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_prev"})
 
-def environment_analysis(df: pd.DataFrame) -> dict:
-    """Top environments by total val, with per-date breakdown."""
-    env = (
-        df.groupby("lvl_3")["val"]
-        .sum()
-        .sort_values(ascending=False)
-        .to_dict()
-    )
-    return {
-        "top_environments": {k: int(v) for k, v in list(env.items())[:15]},
-        "total_unique": int(df["lvl_3"].nunique()),
-    }
+    merged = curr.merge(prev, on=grp_cols, how="outer").fillna(0)
+    merged["val_curr"] = merged["val_curr"].astype(int)
+    merged["val_prev"] = merged["val_prev"].astype(int)
+
+    merged = merged[merged["val_prev"] > 0].copy()
+    merged["delta"] = merged["val_curr"] - merged["val_prev"]
+    merged["pct"] = (merged["delta"] / merged["val_prev"] * 100).round(1)
+
+    flagged = merged[(merged["pct"].abs() > 30) & (merged["delta"].abs() > 5)].copy()
+    flagged = flagged.sort_values("delta", key=abs, ascending=False)
+
+    result = []
+    for _, row in flagged.iterrows():
+        r = {
+            "date_from": str(d_prev),
+            "date_to": str(d_curr),
+            "direction": "spike" if row["delta"] > 0 else "drop",
+            "delta": int(row["delta"]),
+            "pct": float(row["pct"]),
+            "val_prev": int(row["val_prev"]),
+            "val_curr": int(row["val_curr"]),
+        }
+        for col in grp_cols:
+            r[col] = str(row[col]) if col in row else ""
+        result.append(r)
+
+    return result
 
 
-# ---------------------------------------------------------------------------
-# 6. Metric distribution
-# ---------------------------------------------------------------------------
+# ─── 5. Top services ─────────────────────────────────────────────────────────
 
-def metric_analysis(df: pd.DataFrame) -> dict:
-    """Val distribution per metric_name and platform."""
-    by_metric = (
-        df.groupby("metric_name")["val"]
-        .sum()
-        .sort_values(ascending=False)
-        .to_dict()
-    )
-    by_platform = (
-        df.groupby("event_category_name")["val"]
-        .sum()
-        .sort_values(ascending=False)
-        .to_dict()
-    )
-    by_category = (
-        df.groupby("lvl_1")["val"]
-        .sum()
-        .sort_values(ascending=False)
-        .to_dict()
-    )
-    return {
-        "by_metric": {k: int(v) for k, v in by_metric.items()},
-        "by_platform": {k: int(v) for k, v in by_platform.items()},
-        "by_category": {k: int(v) for k, v in by_category.items()},
-    }
-
-
-# ---------------------------------------------------------------------------
-# 7. Workflow statistics
-# ---------------------------------------------------------------------------
-
-def workflow_analysis(df: pd.DataFrame) -> dict:
-    """Top workflows by total val."""
+def detect_top_services(df: pd.DataFrame) -> list:
+    """Top 30 log_name values by total val."""
+    if "log_name" not in df.columns:
+        return []
     top = (
-        df.groupby(["metric_name", "lvl_1", "lvl_2"])["val"]
+        df.groupby("log_name")["val"]
         .sum()
         .sort_values(ascending=False)
-        .head(20)
+        .head(30)
         .reset_index()
     )
+    return [{"log_name": str(r["log_name"]), "total_val": int(r["val"])} for _, r in top.iterrows()]
+
+
+# ─── 6. Channel breakdown ─────────────────────────────────────────────────────
+
+def detect_channel_breakdown(df: pd.DataFrame) -> dict:
+    """Val by day for each channel_name, plus segment breakdown."""
+    df2 = df.copy()
+    df2["date"] = df2["report_dt"].dt.date.astype(str)
+
+    # by channel per day
+    ch_day = (
+        df2.groupby(["date", "channel_name"])["val"]
+        .sum()
+        .reset_index()
+    )
+    by_channel = {}
+    for ch, grp in ch_day.groupby("channel_name"):
+        by_channel[ch] = grp.set_index("date")["val"].to_dict()
+
+    # by segment total
+    by_segment = (
+        df2.groupby("segment_name")["val"]
+        .sum()
+        .sort_values(ascending=False)
+        .to_dict()
+    )
+    by_segment = {k: int(v) for k, v in by_segment.items()}
+
+    # by channel total
+    by_channel_total = (
+        df2.groupby("channel_name")["val"]
+        .sum()
+        .sort_values(ascending=False)
+        .to_dict()
+    )
+    by_channel_total = {k: int(v) for k, v in by_channel_total.items()}
+
     return {
-        "top_workflows": top.to_dict("records"),
-        "total_unique": int(df["lvl_2"].nunique()),
+        "by_channel_per_day": {k: {d: int(v) for d, v in vv.items()} for k, vv in by_channel.items()},
+        "by_channel_total": by_channel_total,
+        "by_segment_total": by_segment,
     }
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ─── 7. Status screen (55558) breakdown ──────────────────────────────────────
 
-def _trend_description(direction, slope, r2, p_value, pct_change) -> str:
-    sig = "значимо" if p_value < 0.05 else "незначимо"
-    arrows = {"growing": "↑", "declining": "↓", "stable": "→"}
-    arrow = arrows.get(direction, "")
-    if direction == "stable":
-        return f"{arrow} Стабильно (R²={r2:.2f}, {sig})"
-    sign = "+" if pct_change > 0 else ""
-    return f"{arrow} {sign}{pct_change:.1f}% за период (slope={slope:+.1f}, R²={r2:.2f}, {sig})"
+def detect_status_screen(df: pd.DataFrame) -> dict:
+    """For metric_id=55558: breakdown by lvl_4 per day and total."""
+    ss = df[df["metric_id_int"] == 55558].copy() if "metric_id_int" in df.columns else \
+         df[df["metric_id"].astype(str) == "55558"].copy()
+
+    if ss.empty:
+        return {"total": {}, "by_day": {}, "total_val": 0}
+
+    ss["date"] = ss["report_dt"].dt.date.astype(str)
+
+    # total by lvl_4
+    total = (
+        ss.groupby("lvl_4")["val"]
+        .sum()
+        .sort_values(ascending=False)
+        .to_dict()
+    )
+    total = {k: int(v) for k, v in total.items()}
+
+    # by day and lvl_4
+    day_lvl4 = (
+        ss.groupby(["date", "lvl_4"])["val"]
+        .sum()
+        .reset_index()
+    )
+    by_day = {}
+    for date, grp in day_lvl4.groupby("date"):
+        by_day[date] = {str(r["lvl_4"]): int(r["val"]) for _, r in grp.iterrows()}
+
+    return {
+        "total": total,
+        "by_day": by_day,
+        "total_val": int(ss["val"].sum()),
+    }

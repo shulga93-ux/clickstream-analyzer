@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Clickstream Analyzer</title>
+<title>СБОЛ.про — Анализ ошибок</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
          background: #f0f2f5; min-height: 100vh; display: flex; flex-direction: column;
          align-items: center; justify-content: center; padding: 24px; }
   .card { background: white; border-radius: 16px; padding: 40px;
-          box-shadow: 0 8px 32px rgba(0,0,0,0.12); width: 100%; max-width: 520px; }
+          box-shadow: 0 8px 32px rgba(0,0,0,0.12); width: 100%; max-width: 540px; }
   .logo { text-align: center; margin-bottom: 32px; }
-  .logo h1 { font-size: 1.8rem; font-weight: 700; color: #1a1a2e; }
+  .logo h1 { font-size: 1.7rem; font-weight: 700; color: #1a1a2e; }
   .logo p { color: #888; margin-top: 8px; }
   .drop-zone { border: 2px dashed #d0d7de; border-radius: 12px; padding: 40px 24px;
                text-align: center; cursor: pointer; transition: all 0.2s;
@@ -61,15 +61,15 @@
 <body>
 <div class="card">
   <div class="logo">
-    <h1>📊 Clickstream Analyzer</h1>
-    <p>Загрузите данные — получите отчёт с аномалиями и трендами</p>
+    <h1>📊 СБОЛ.про — Анализ ошибок</h1>
+    <p>Загрузите данные — получите отчёт с WoW/DoD аномалиями и трендами</p>
   </div>
 
   <div class="drop-zone" id="dropZone">
-    <input type="file" id="fileInput" accept=".csv,.json,.jsonl,.ndjson">
+    <input type="file" id="fileInput" accept=".csv,.xlsx">
     <div class="icon">📂</div>
     <div><strong>Перетащите файл</strong> или нажмите для выбора</div>
-    <div class="hint">CSV, JSON, JSONL · до 50 МБ</div>
+    <div class="hint">CSV, XLSX · до 50 МБ</div>
   </div>
   <div class="selected-file" id="selectedFile"></div>
 
@@ -85,12 +85,15 @@
   <div class="formats">
     <h4>Ожидаемые колонки</h4>
     <div class="format-cols">
-      <div class="format-item"><code>timestamp</code> — дата/время события</div>
-      <div class="format-item"><code>user_id</code> — ID пользователя</div>
-      <div class="format-item"><code>event_type</code> — тип события</div>
-      <div class="format-item"><code>session_id</code> — ID сессии</div>
-      <div class="format-item"><code>page</code> / <code>url</code> — страница</div>
-      <div class="format-item"><code>duration</code> — длительность (опц.)</div>
+      <div class="format-item"><code>metric_id</code> — 55556/55557/55558</div>
+      <div class="format-item"><code>report_dt</code> — дата (YYYY-MM-DD)</div>
+      <div class="format-item"><code>event_category_name</code> — канал</div>
+      <div class="format-item"><code>log_name</code> — сервис/ошибка</div>
+      <div class="format-item"><code>lvl_1</code> — сегмент (EMP/FL/GB)</div>
+      <div class="format-item"><code>lvl_2</code> — продукт СБОЛ.про</div>
+      <div class="format-item"><code>lvl_3</code> — блок/окружение</div>
+      <div class="format-item"><code>lvl_4</code> — тип статус. экрана</div>
+      <div class="format-item" style="grid-column:1/-1;"><code>val</code> — количество событий за день</div>
     </div>
   </div>
 
@@ -159,14 +162,17 @@
 
     if (ok && data.report_url) {
       const s = data.summary;
+      const dr = s.date_range ? `${s.date_range.start} → ${s.date_range.end}` : "—";
       el.className = "result success";
       el.innerHTML = `
         <h3>✅ Анализ завершён</h3>
+        <div style="font-size:0.82rem;color:#888;margin-bottom:12px;">Период: ${dr}</div>
         <div class="stats-grid">
-          <div class="stat-item"><div class="num">${s.total_events.toLocaleString()}</div><div class="lbl">Событий</div></div>
-          <div class="stat-item"><div class="num">${s.unique_users.toLocaleString()}</div><div class="lbl">Пользователей</div></div>
-          <div class="stat-item"><div class="num" style="color:${s.anomalies_found>0?'#e74c3c':'#27ae60'}">${s.anomalies_found}</div><div class="lbl">Аномалий</div></div>
-          <div class="stat-item"><div class="num" style="color:${s.deviations_found>0?'#f39c12':'#27ae60'}">${s.deviations_found}</div><div class="lbl">Отклонений</div></div>
+          <div class="stat-item"><div class="num">${(s.total_records||0).toLocaleString()}</div><div class="lbl">Строк данных</div></div>
+          <div class="stat-item"><div class="num">${(s.unique_products||0).toLocaleString()}</div><div class="lbl">Продуктов</div></div>
+          <div class="stat-item"><div class="num" style="color:${s.anomalies_found>0?'#e74c3c':'#27ae60'}">${s.anomalies_found||0}</div><div class="lbl">Аномалий</div></div>
+          <div class="stat-item"><div class="num" style="color:${s.wow_deviations>0?'#f39c12':'#27ae60'}">${s.wow_deviations||0}</div><div class="lbl">WoW откл.</div></div>
+          <div class="stat-item" style="grid-column:1/-1;"><div class="num" style="color:${s.dod_deviations>0?'#e67e22':'#27ae60'}">${s.dod_deviations||0}</div><div class="lbl">DoD отклонений</div></div>
         </div>
         <a class="open-btn" href="${data.report_url}" target="_blank">📊 Открыть отчёт</a>
       `;

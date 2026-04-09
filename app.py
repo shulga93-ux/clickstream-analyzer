@@ -1,7 +1,7 @@
 import os
 import uuid
 from pathlib import Path
-from flask import Flask, request, render_template, send_file, jsonify, redirect, url_for
+from flask import Flask, request, render_template, send_file, jsonify
 
 from analyzer.parser import parse_file, get_summary
 from analyzer.detector import detect_all
@@ -15,7 +15,7 @@ REPORT_DIR = Path("reports")
 UPLOAD_DIR.mkdir(exist_ok=True)
 REPORT_DIR.mkdir(exist_ok=True)
 
-ALLOWED_EXTENSIONS = {".csv", ".json", ".jsonl", ".ndjson"}
+ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 
 def allowed_file(filename: str) -> bool:
@@ -37,23 +37,18 @@ def upload():
         return jsonify({"error": "Empty filename"}), 400
 
     if not allowed_file(file.filename):
-        return jsonify({"error": f"Unsupported format. Use: CSV, JSON, JSONL"}), 400
+        return jsonify({"error": "Unsupported format. Use: CSV, XLSX"}), 400
 
-    # Save upload
     suffix = Path(file.filename).suffix.lower()
     upload_id = str(uuid.uuid4())[:8]
     upload_path = UPLOAD_DIR / f"{upload_id}{suffix}"
     file.save(upload_path)
 
     try:
-        # Parse
         df = parse_file(str(upload_path))
         summary = get_summary(df)
-
-        # Analyze
         results = detect_all(df)
 
-        # Generate report
         report_filename = f"report_{upload_id}.html"
         report_path = REPORT_DIR / report_filename
         generate_report(df, summary, results, str(report_path))
@@ -62,13 +57,12 @@ def upload():
             "status": "ok",
             "report_url": f"/reports/{report_filename}",
             "summary": {
-                "total_records": summary.get("total_records", summary.get("total_events", 0)),
-                "unique_metrics": summary.get("unique_metrics", summary.get("unique_users", 0)),
-                "unique_workflows": summary.get("unique_workflows", summary.get("unique_sessions", 0)),
-                "unique_environments": summary.get("unique_environments", 0),
+                "total_records": summary.get("total_records", 0),
+                "unique_products": summary.get("unique_products", summary.get("unique_workflows", 0)),
                 "date_range": summary.get("date_range", {}),
                 "anomalies_found": len(results.get("anomalies", [])),
-                "deviations_found": len(results.get("deviations", [])),
+                "wow_deviations": len(results.get("wow", [])),
+                "dod_deviations": len(results.get("dod", [])),
             }
         })
 
@@ -78,7 +72,6 @@ def upload():
         app.logger.exception("Analysis failed")
         return jsonify({"error": f"Analysis failed: {str(e)}"}), 500
     finally:
-        # Clean up upload
         try:
             upload_path.unlink()
         except Exception:
