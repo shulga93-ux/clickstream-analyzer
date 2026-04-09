@@ -74,10 +74,16 @@ def upload():
             summary = get_summary(df_analysis)
             results = detect_all(df_analysis)
 
-            # Override product_dynamics with full df (all lvl_4 types) for 55558
+            # Override product_dynamics for 55558:
+            # - products/total_val/DoD/WoW/matrix → only lvl_4="Ошибка"
+            # - lvl4_matrix (for chart breakdown) → all lvl_4 types
             if metric_id == "55558":
                 from analyzer.detector import detect_product_dynamics
-                results["product_dynamics"] = detect_product_dynamics(df_m)
+                df_error = df_m[df_m["lvl_4"] == "Ошибка"].copy()
+                pd_error = detect_product_dynamics(df_error)   # stats on Ошибка only
+                pd_full  = detect_product_dynamics(df_m)       # lvl4_matrix for chart
+                pd_error["lvl4_matrix"] = pd_full["lvl4_matrix"]   # inject full lvl4 breakdown
+                results["product_dynamics"] = pd_error
 
             slug = str(metric_id)
             report_filename = f"report_{upload_id}_{slug}.html"
