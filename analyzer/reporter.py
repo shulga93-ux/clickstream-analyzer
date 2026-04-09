@@ -207,35 +207,146 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
         )
         charts["trend_lines"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 9. Product dynamics heatmap (top products × dates)
+    # 9. Product drill-down: dropdown selector → bar chart by block_type per day
     pd_data = results.get("product_dynamics", {})
-    matrix = pd_data.get("matrix", {})
+    block_matrix = pd_data.get("block_matrix", {})
+    channel_matrix = pd_data.get("channel_matrix", {})
     dates_pd = pd_data.get("dates", [])
     products_meta = pd_data.get("products", [])
-    if matrix and dates_pd and products_meta:
-        product_names = [p["name"] for p in products_meta]
-        # z[i] = row for product i, values per date
-        z = []
-        for p in product_names:
-            row = [matrix[p].get(d, 0) for d in dates_pd]
-            z.append(row)
-        fig = go.Figure(go.Heatmap(
-            z=z,
-            x=dates_pd,
-            y=product_names,
-            colorscale="YlOrRd",
-            hoverongaps=False,
-            hovertemplate="<b>%{y}</b><br>%{x}: %{z:,}<extra></extra>",
-            colorbar=dict(title="val"),
-        ))
+
+    if block_matrix and dates_pd and products_meta:
+        BLOCK_COLORS = {
+            "боевой":    "#e74c3c",
+            "пилотный":  "#27ae60",
+            "резервный": "#3498db",
+            "неизвестный": "#aaa",
+        }
+        CHANNEL_COLORS = {
+            "iPad (Планшеты)": "#9b59b6",
+            "Web (АРМ)":       "#f39c12",
+        }
+        block_types = ["боевой", "пилотный", "резервный", "неизвестный"]
+        channel_names = ["Web (АРМ)", "iPad (Планшеты)"]
+
+        traces = []
+        buttons = []
+        # Each product: traces for block_types + channels (all visible only for that product)
+        traces_per_product = []
+
+        for pm in products_meta:
+            p = pm["name"]
+            product_traces = []
+
+            # Block traces
+            for bt in block_types:
+                bdata = block_matrix.get(p, {}).get(bt, {})
+                y_vals = [bdata.get(d, 0) for d in dates_pd]
+                if sum(y_vals) == 0:
+                    continue
+                product_traces.append({
+                    "x": dates_pd, "y": y_vals,
+                    "name": bt, "type": "bar",
+                    "marker_color": BLOCK_COLORS.get(bt, "#aaa"),
+                    "legendgroup": bt,
+                    "showlegend": True,
+                })
+
+            # Channel lines (secondary axis)
+            for ch in channel_names:
+                chdata = channel_matrix.get(p, {}).get(ch, {})
+                y_vals = [chdata.get(d, 0) for d in dates_pd]
+                if sum(y_vals) == 0:
+                    continue
+                product_traces.append({
+                    "x": dates_pd, "y": y_vals,
+                    "name": ch, "type": "scatter",
+                    "mode": "lines+markers",
+                    "line": {"color": CHANNEL_COLORS.get(ch, "#888"), "width": 2, "dash": "dot"},
+                    "marker": {"size": 5},
+                    "legendgroup": ch,
+                    "showlegend": True,
+                    "yaxis": "y2",
+                })
+
+            traces_per_product.append(product_traces)
+
+        # Flatten all traces; first product visible
+        all_traces = []
+        visibility_map = []  # list of lists: which global indices belong to each product
+        idx = 0
+        for i, pt in enumerate(traces_per_product):
+            vis_indices = list(range(idx, idx + len(pt)))
+            visibility_map.append(vis_indices)
+            for t in pt:
+                is_visible = (i == 0)
+                scatter_kwargs = {}
+                if t["type"] == "bar":
+                    tr = go.Bar(
+                        x=t["x"], y=t["y"], name=t["name"],
+                        marker_color=t["marker_color"],
+                        legendgroup=t["legendgroup"],
+                        showlegend=is_visible,
+                        visible=is_visible,
+                    )
+                else:
+                    tr = go.Scatter(
+                        x=t["x"], y=t["y"], name=t["name"],
+                        mode=t["mode"],
+                        line=t["line"],
+                        marker=t["marker"],
+                        legendgroup=t["legendgroup"],
+                        showlegend=is_visible,
+                        visible=is_visible,
+                        yaxis=t.get("yaxis", "y"),
+                    )
+                all_traces.append(tr)
+                idx += 1
+
+        total_traces = idx
+
+        # Build dropdown buttons
+        for i, pm in enumerate(products_meta):
+            vis = [False] * total_traces
+            for vi in visibility_map[i]:
+                vis[vi] = True
+            dod_str = f"DoD {pm['dod_pct']:+.1f}%" if pm.get("dod_pct") is not None else "DoD —"
+            wow_str = f"WoW {pm['wow_pct']:+.1f}%" if pm.get("wow_pct") is not None else "WoW —"
+            buttons.append(dict(
+                label=f"{pm['name']}  [{dod_str} / {wow_str}]",
+                method="update",
+                args=[
+                    {"visible": vis, "showlegend": vis},
+                    {"title": f"📦 {pm['name']} — ошибки по блокам  |  {dod_str}  ·  {wow_str}  |  Σ {pm['total_val']:,}"},
+                ],
+            ))
+
+        fig = go.Figure(data=all_traces)
+        first = products_meta[0]
+        dod_str0 = f"DoD {first['dod_pct']:+.1f}%" if first.get("dod_pct") is not None else "DoD —"
+        wow_str0 = f"WoW {first['wow_pct']:+.1f}%" if first.get("wow_pct") is not None else "WoW —"
         fig.update_layout(
-            title="Динамика ошибок по продуктам (топ-40)",
-            height=max(500, len(product_names) * 18),
-            margin=dict(l=200, r=40, t=50, b=60),
+            title=f"📦 {first['name']} — ошибки по блокам  |  {dod_str0}  ·  {wow_str0}  |  Σ {first['total_val']:,}",
+            barmode="stack",
+            height=440,
+            margin=dict(l=40, r=40, t=90, b=60),
+            plot_bgcolor="#fafafa",
+            paper_bgcolor="#ffffff",
             xaxis_title="Дата",
-            yaxis=dict(autorange="reversed"),
+            yaxis=dict(title="Кол-во ошибок (блоки)", side="left"),
+            yaxis2=dict(title="Кол-во ошибок (каналы)", overlaying="y", side="right", showgrid=False),
+            legend=dict(orientation="h", y=-0.18),
+            updatemenus=[dict(
+                buttons=buttons,
+                direction="down",
+                showactive=True,
+                x=0.0, xanchor="left",
+                y=1.18, yanchor="top",
+                bgcolor="#ffffff",
+                bordercolor="#d0d7de",
+                font=dict(size=12),
+            )],
         )
-        charts["product_heatmap"] = fig.to_html(full_html=False, include_plotlyjs=False)
+        charts["product_drill"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
     return charts
 
@@ -436,14 +547,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- Product heatmap: top-40 products × dates -->
-  {% if charts.product_heatmap %}
+  <!-- Product drill-down: dropdown → bar by block_type + channel lines -->
+  {% if charts.product_drill %}
   <div class="section">
-    <h2>🗓️ Динамика по продуктам день за днём</h2>
+    <h2>🗓️ Динамика по продукту день за днём</h2>
     <p style="color:#888;font-size:0.85rem;margin-bottom:12px;">
-      Тепловая карта: чем темнее — тем больше ошибок. Наведите на ячейку для деталей.
+      Выберите продукт из списка — увидите динамику ошибок по блокам (боевой / пилотный / резервный) и каналам.
     </p>
-    {{ charts.product_heatmap }}
+    {{ charts.product_drill }}
     {% if pd_data.products %}
     <div style="margin-top:16px;overflow-x:auto;">
       <table class="stat-table">

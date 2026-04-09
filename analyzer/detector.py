@@ -390,6 +390,8 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
       - dod_pct: dict {product_name: pct_change D vs D-1 for last date}
       - wow_pct: dict {product_name: pct_change D vs D-7 for last date}
     """
+    import datetime as _dt
+
     df2 = df.copy()
     df2["date"] = df2["report_dt"].dt.date.astype(str)
 
@@ -400,29 +402,58 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
         .reset_index()
         .sort_values("val", ascending=False)
     )
-    # Keep one row per lvl_2 (primary metric/segment)
     top_products = top_products.drop_duplicates("lvl_2").head(top_n)
     product_names = top_products["lvl_2"].tolist()
 
-    # Daily totals per product
-    daily = (
-        df2.groupby(["lvl_2", "date"])["val"]
+    # All dates
+    dates = sorted(df2["date"].unique())
+    last_date = dates[-1] if dates else None
+
+    # ── Summary matrix (product × date) ──────────────────────────────────────
+    daily_sum = (
+        df2[df2["lvl_2"].isin(product_names)]
+        .groupby(["lvl_2", "date"])["val"]
         .sum()
         .reset_index()
     )
-    daily = daily[daily["lvl_2"].isin(product_names)]
-
-    dates = sorted(daily["date"].unique())
-
-    # Build matrix
     matrix = {p: {} for p in product_names}
-    for _, row in daily.iterrows():
+    for _, row in daily_sum.iterrows():
         matrix[row["lvl_2"]][row["date"]] = int(row["val"])
 
-    # DoD and WoW for last date
-    last_date = dates[-1] if dates else None
+    # ── Drill-down: product × block_type × date ───────────────────────────────
+    daily_block = (
+        df2[df2["lvl_2"].isin(product_names)]
+        .groupby(["lvl_2", "block_type", "date"])["val"]
+        .sum()
+        .reset_index()
+    )
+    # {product: {block_type: {date: val}}}
+    block_matrix = {p: {} for p in product_names}
+    for _, row in daily_block.iterrows():
+        p, bt, d, v = row["lvl_2"], row["block_type"], row["date"], int(row["val"])
+        if bt not in block_matrix[p]:
+            block_matrix[p][bt] = {}
+        block_matrix[p][bt][d] = v
+
+    # ── Drill-down: product × channel × date ─────────────────────────────────
+    daily_channel = (
+        df2[df2["lvl_2"].isin(product_names)]
+        .groupby(["lvl_2", "channel_name", "date"])["val"]
+        .sum()
+        .reset_index()
+    )
+    channel_matrix = {p: {} for p in product_names}
+    for _, row in daily_channel.iterrows():
+        p, ch, d, v = row["lvl_2"], row["channel_name"], row["date"], int(row["val"])
+        if ch not in channel_matrix[p]:
+            channel_matrix[p][ch] = {}
+        channel_matrix[p][ch][d] = v
+
+    # ── DoD / WoW per product ─────────────────────────────────────────────────
     dod_pct = {}
     wow_pct = {}
+    dod_delta = {}
+    wow_delta = {}
 
     if last_date and len(dates) >= 2:
         prev_date = dates[-2]
@@ -431,32 +462,42 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
             prev = matrix[p].get(prev_date, 0)
             if prev > 0:
                 dod_pct[p] = round((curr - prev) / prev * 100, 1)
+                dod_delta[p] = curr - prev
 
     if last_date:
-        import datetime as _dt
-        last_dt = _dt.date.fromisoformat(last_date)
-        wow_date = str(last_dt - _dt.timedelta(days=7))
+        wow_date = str(_dt.date.fromisoformat(last_date) - _dt.timedelta(days=7))
         if wow_date in dates:
             for p in product_names:
                 curr = matrix[p].get(last_date, 0)
                 prev = matrix[p].get(wow_date, 0)
                 if prev > 0:
                     wow_pct[p] = round((curr - prev) / prev * 100, 1)
+                    wow_delta[p] = curr - prev
 
     products_meta = []
     for _, row in top_products.iterrows():
+        p = str(row["lvl_2"])
         products_meta.append({
-            "name": str(row["lvl_2"]),
+            "name": p,
             "total_val": int(row["val"]),
             "metric_name": str(row["metric_name"]),
             "segment": str(row["segment_name"]),
+            "dod_pct": dod_pct.get(p),
+            "dod_delta": dod_delta.get(p),
+            "wow_pct": wow_pct.get(p),
+            "wow_delta": wow_delta.get(p),
+            "last_val": matrix[p].get(last_date, 0) if last_date else 0,
         })
 
     return {
         "dates": dates,
         "products": products_meta,
         "matrix": matrix,
+        "block_matrix": block_matrix,
+        "channel_matrix": channel_matrix,
         "dod_pct": dod_pct,
         "wow_pct": wow_pct,
+        "dod_delta": dod_delta,
+        "wow_delta": wow_delta,
         "last_date": last_date,
     }
