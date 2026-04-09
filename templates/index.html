@@ -46,6 +46,16 @@
   .stat-item .lbl { font-size: 0.75rem; color: #888; }
   .open-btn { display: block; text-align: center; padding: 12px; background: #1e8449;
               color: white; text-decoration: none; border-radius: 8px; font-weight: 600; }
+  .reports-list { display: flex; flex-direction: column; gap: 10px; }
+  .report-btn { display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+                background: #f8f9fa; border: 1.5px solid #e0e0e0; border-radius: 10px;
+                text-decoration: none; color: #1a1a2e; transition: all 0.15s; }
+  .report-btn:hover { background: #f0f6ff; border-color: #4f8ef7; }
+  .report-icon { font-size: 1.6rem; flex-shrink: 0; }
+  .report-info { flex: 1; }
+  .report-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 3px; }
+  .report-stats { font-size: 0.78rem; color: #888; display: flex; gap: 4px; }
+  .report-arrow { color: #4f8ef7; font-size: 1.1rem; font-weight: 700; }
   .formats { margin-top: 28px; border-top: 1px solid #f0f2f5; padding-top: 20px; }
   .formats h4 { font-size: 0.85rem; color: #888; margin-bottom: 10px; text-transform: uppercase; }
   .format-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.8rem; }
@@ -160,22 +170,42 @@
     el.style.display = "block";
     analyzeBtn.disabled = false;
 
-    if (ok && data.report_url) {
+    if (ok && data.reports && data.reports.length > 0) {
       const s = data.summary;
       const dr = s.date_range ? `${s.date_range.start} → ${s.date_range.end}` : "—";
       el.className = "result success";
+
+      const reportBtns = data.reports.map(r => {
+        const icons = {55556: "⚠️", 55557: "🔴", 55558: "🖥️"};
+        const icon = icons[r.metric_id] || "📊";
+        const dod = r.dod_deviations > 0 ? `<span style="color:#e67e22">DoD: ${r.dod_deviations}</span>` : `<span style="color:#27ae60">DoD: 0</span>`;
+        const wow = r.wow_deviations > 0 ? `<span style="color:#f39c12">WoW: ${r.wow_deviations}</span>` : `<span style="color:#27ae60">WoW: 0</span>`;
+        return `
+          <a class="report-btn" href="${r.report_url}" target="_blank">
+            <div class="report-icon">${icon}</div>
+            <div class="report-info">
+              <div class="report-name">${r.label}</div>
+              <div class="report-stats">${dod} &nbsp;·&nbsp; ${wow} &nbsp;·&nbsp; ${(r.total_val||0).toLocaleString()} событий</div>
+            </div>
+            <div class="report-arrow">→</div>
+          </a>`;
+      }).join("");
+
       el.innerHTML = `
-        <h3>✅ Анализ завершён</h3>
-        <div style="font-size:0.82rem;color:#888;margin-bottom:12px;">Период: ${dr}</div>
-        <div class="stats-grid">
+        <h3>✅ Анализ завершён · ${dr}</h3>
+        <div class="stats-grid" style="margin:12px 0;">
           <div class="stat-item"><div class="num">${(s.total_records||0).toLocaleString()}</div><div class="lbl">Строк данных</div></div>
           <div class="stat-item"><div class="num">${(s.unique_products||0).toLocaleString()}</div><div class="lbl">Продуктов</div></div>
-          <div class="stat-item"><div class="num" style="color:${s.anomalies_found>0?'#e74c3c':'#27ae60'}">${s.anomalies_found||0}</div><div class="lbl">Аномалий</div></div>
-          <div class="stat-item"><div class="num" style="color:${s.wow_deviations>0?'#f39c12':'#27ae60'}">${s.wow_deviations||0}</div><div class="lbl">WoW откл.</div></div>
-          <div class="stat-item" style="grid-column:1/-1;"><div class="num" style="color:${s.dod_deviations>0?'#e67e22':'#27ae60'}">${s.dod_deviations||0}</div><div class="lbl">DoD отклонений</div></div>
+          <div class="stat-item"><div class="num" style="color:#e74c3c">${s.anomalies_found||0}</div><div class="lbl">Аномалий</div></div>
+          <div class="stat-item"><div class="num" style="color:#f39c12">${s.wow_deviations||0}</div><div class="lbl">WoW откл.</div></div>
         </div>
-        <a class="open-btn" href="${data.report_url}" target="_blank">📊 Открыть отчёт</a>
+        <div class="reports-list">${reportBtns}</div>
       `;
+      loadRecent();
+    } else if (ok && data.report_url) {
+      // fallback single report
+      el.className = "result success";
+      el.innerHTML = `<h3>✅ Готово</h3><a class="open-btn" href="${data.report_url}" target="_blank">📊 Открыть отчёт</a>`;
       loadRecent();
     } else {
       el.className = "result error";
