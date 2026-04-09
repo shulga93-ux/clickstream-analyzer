@@ -102,52 +102,19 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             })
         return sorted(result, key=lambda x: abs(x["delta"]), reverse=True)
 
-    def _deviation_bar(grouped, title, chart_key):
-        if not grouped:
-            return
-        top50 = grouped[:50]
-        labels = [f"{r['segment']} / {r['lvl_2']}" for r in top50]
-        deltas = [r["delta"] for r in top50]
-        pcts = [r["pct"] for r in top50]
-        colors = ["#e74c3c" if d > 0 else "#3498db" for d in deltas]
-        text_labels = [f"{d:+,} ({p:+.0f}%)" for d, p in zip(deltas, pcts)]
-        fig = go.Figure(go.Bar(
-            y=labels[::-1], x=deltas[::-1],
-            orientation="h",
-            marker_color=colors[::-1],
-            text=text_labels[::-1],
-            textposition="outside",
-        ))
-        fig.update_layout(
-            title=title,
-            height=max(400, len(top50) * 22),
-            margin=dict(l=240, r=130, t=50, b=20),
-            plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
-            xaxis_title="Изменение (Δval)",
-        )
-        charts[chart_key] = fig.to_html(full_html=False, include_plotlyjs=False)
-
-    # 2. WoW deviations — grouped by product, top 50 by |delta|
+    # 2. WoW deviations — grouped by product, stored as data for HTML table
     wow = results.get("wow", [])
-    if wow:
-        wow_grouped = _group_by_product(wow)
-        d0 = wow[0]
-        _deviation_bar(
-            wow_grouped,
-            f"WoW отклонения по продуктам (топ-50) — {d0['date_from']} vs {d0['date_to']}",
-            "wow_bar",
-        )
+    wow_grouped = _group_by_product(wow) if wow else []
 
-    # 3. DoD deviations — grouped by product, top 50 by |delta|
+    # 3. DoD deviations — grouped by product, stored as data for HTML table
     dod = results.get("dod", [])
-    if dod:
-        dod_grouped = _group_by_product(dod)
-        d0 = dod[0]
-        _deviation_bar(
-            dod_grouped,
-            f"DoD отклонения по продуктам (топ-50) — {d0['date_from']} vs {d0['date_to']}",
-            "dod_bar",
-        )
+    dod_grouped = _group_by_product(dod) if dod else []
+
+    # Store in charts dict as JSON-serialisable data (rendered via template table)
+    charts["wow_grouped"] = wow_grouped[:50]
+    charts["dod_grouped"] = dod_grouped[:50]
+    charts["wow_meta"] = {"date_from": wow[0]["date_from"], "date_to": wow[0]["date_to"]} if wow else {}
+    charts["dod_meta"] = {"date_from": dod[0]["date_from"], "date_to": dod[0]["date_to"]} if dod else {}
 
     # 4. Top-20 services horizontal bar
     top_services = results.get("top_services", [])
@@ -427,6 +394,10 @@ def _render_html(summary: dict, results: dict, charts: dict) -> str:
     ss = results.get("status_screen", {})
 
     pd_data = results.get("product_dynamics", {})
+    wow_grouped = charts.pop("wow_grouped", [])
+    dod_grouped = charts.pop("dod_grouped", [])
+    wow_meta = charts.pop("wow_meta", {})
+    dod_meta = charts.pop("dod_meta", {})
 
     template = Template(HTML_TEMPLATE)
     return template.render(
@@ -435,6 +406,10 @@ def _render_html(summary: dict, results: dict, charts: dict) -> str:
         anomalies=anomalies,
         wow=wow,
         dod=dod,
+        wow_grouped=wow_grouped,
+        dod_grouped=dod_grouped,
+        wow_meta=wow_meta,
+        dod_meta=dod_meta,
         trends=trends,
         top_services=top_services,
         ss=ss,
@@ -481,6 +456,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                      font-size: 0.76rem; text-transform: uppercase; color: #888; }
     .stat-table td { padding: 7px 10px; border-bottom: 1px solid #f0f2f5; }
     .stat-table tr:last-child td { border-bottom: none; }
+    .dev-tbl td, .dev-tbl th { padding: 6px 8px; font-size: 0.83rem; }
+    .dev-tbl tr:hover td { background: #f8f9fa; }
     .badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
              font-size: 0.72rem; font-weight: 600; }
     .badge-red    { background: #ffe0e0; color: #c0392b; }
@@ -556,28 +533,60 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
   <!-- WoW & DoD side by side -->
   <div class="two-col">
+
+    {# Macro: deviation table with inline bar #}
+    {% macro dev_table(rows, meta) %}
+    {% if rows %}
+    {% set max_delta = namespace(v=1) %}
+    {% for r in rows %}{% if r.delta | abs > max_delta.v %}{% set max_delta.v = r.delta | abs %}{% endif %}{% endfor %}
+    <div style="overflow-x:auto;">
+    <table class="stat-table dev-tbl">
+      <thead>
+        <tr>
+          <th style="width:36%">Продукт</th>
+          <th>Сегмент</th>
+          <th style="text-align:right">Было</th>
+          <th style="text-align:right">Стало</th>
+          <th style="text-align:right">Δval</th>
+          <th style="text-align:right">%</th>
+          <th style="width:80px"></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+      {% set is_up = r.delta > 0 %}
+      {% set bar_w = ((r.delta | abs) / max_delta.v * 76) | int %}
+      <tr>
+        <td><strong>{{ r.lvl_2 }}</strong></td>
+        <td style="color:#666;font-size:0.82rem;">{{ r.segment }}</td>
+        <td style="text-align:right;color:#888;">{{ "{:,}".format(r.val_prev) }}</td>
+        <td style="text-align:right;">{{ "{:,}".format(r.val_curr) }}</td>
+        <td style="text-align:right;font-weight:700;color:{{ '#e74c3c' if is_up else '#3498db' }};">
+          {{ '+' if is_up else '' }}{{ "{:,}".format(r.delta) }}
+        </td>
+        <td style="text-align:right;font-weight:600;color:{{ '#e74c3c' if is_up else '#3498db' }};">
+          {{ '+' if is_up else '' }}{{ r.pct }}%
+        </td>
+        <td>
+          <div style="background:{{ '#e74c3c' if is_up else '#3498db' }};height:10px;border-radius:3px;width:{{ bar_w }}px;min-width:2px;"></div>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">✅ Отклонений нет</div>
+    {% endif %}
+    {% endmacro %}
+
     <!-- WoW -->
     <div class="section">
-      <h2>📅 WoW отклонения (неделя к неделе) — {{ wow | length }}</h2>
-      {% if charts.wow_bar %}
-        {{ charts.wow_bar }}
-      {% elif wow %}
-        {% for d in wow[:15] %}
-        <div class="deviation-row {{ 'dev-spike' if d.direction == 'spike' else 'dev-drop' }}">
-          <strong>{{ d.get('metric_name','') }}</strong> /
-          {{ d.get('segment_name', d.get('lvl_1','')) }} / {{ d.get('lvl_2','') }}
-          <br>
-          <span style="font-size:0.78rem;color:#888;">{{ d.date_from }} → {{ d.date_to }} · блок: {{ d.get('block_type','') }}</span>
-          <br>
-          {{ d.val_prev }} → <strong>{{ d.val_curr }}</strong>
-          <span style="color:{{ '#e74c3c' if d.direction=='spike' else '#3498db' }};font-weight:700;">
-            {{ '+' if d.pct > 0 else '' }}{{ d.pct }}%
-          </span>
-        </div>
-        {% endfor %}
-        {% if wow | length > 15 %}
-        <div style="color:#888;font-size:0.82rem;padding:8px;">... и ещё {{ wow | length - 15 }}</div>
-        {% endif %}
+      <h2>📅 WoW отклонения — {{ wow_grouped | length }} продуктов
+        {% if wow_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">{{ wow_meta.date_from }} vs {{ wow_meta.date_to }}</span>{% endif %}
+      </h2>
+      {% if wow_grouped %}
+        {{ dev_table(wow_grouped, wow_meta) }}
       {% else %}
         <div class="empty-state">✅ WoW отклонений нет (нет данных за -7 дней или ниже порога)</div>
       {% endif %}
@@ -585,26 +594,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     <!-- DoD -->
     <div class="section">
-      <h2>📆 DoD отклонения (день к дню) — {{ dod | length }}</h2>
-      {% if charts.dod_bar %}
-        {{ charts.dod_bar }}
-      {% elif dod %}
-        {% for d in dod[:15] %}
-        <div class="deviation-row {{ 'dev-spike' if d.direction == 'spike' else 'dev-drop' }}">
-          <strong>{{ d.get('metric_name','') }}</strong> /
-          {{ d.get('segment_name', d.get('lvl_1','')) }} / {{ d.get('lvl_2','') }}
-          <br>
-          <span style="font-size:0.78rem;color:#888;">{{ d.date_from }} → {{ d.date_to }} · блок: {{ d.get('block_type','') }}</span>
-          <br>
-          {{ d.val_prev }} → <strong>{{ d.val_curr }}</strong>
-          <span style="color:{{ '#e74c3c' if d.direction=='spike' else '#3498db' }};font-weight:700;">
-            {{ '+' if d.pct > 0 else '' }}{{ d.pct }}%
-          </span>
-        </div>
-        {% endfor %}
-        {% if dod | length > 15 %}
-        <div style="color:#888;font-size:0.82rem;padding:8px;">... и ещё {{ dod | length - 15 }}</div>
-        {% endif %}
+      <h2>📆 DoD отклонения — {{ dod_grouped | length }} продуктов
+        {% if dod_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">{{ dod_meta.date_from }} vs {{ dod_meta.date_to }}</span>{% endif %}
+      </h2>
+      {% if dod_grouped %}
+        {{ dev_table(dod_grouped, dod_meta) }}
       {% else %}
         <div class="empty-state">✅ DoD отклонений нет (ниже порога >50%)</div>
       {% endif %}
