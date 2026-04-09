@@ -21,22 +21,34 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
     COLORS = px.colors.qualitative.Set2
     COLORS_SEQ = px.colors.sequential.Blues
 
-    # 1. Stacked bar: total val by day, stacked by metric_name
+    # 1. Stacked bar: total val by day, stacked by block_type
     trends = results.get("trends", {})
     ts_by_metric = trends.get("timeseries", {})
-    if ts_by_metric:
+    ch_data = results.get("channel_breakdown", {})
+    by_block = ch_data.get("by_block_per_day", {})
+    block_dates = ch_data.get("dates", [])
+    BLOCK_ORDER = ["боевой", "пилотный", "резервный", "неизвестный"]
+    BLOCK_COLORS_TIMELINE = {
+        "боевой":      "#e74c3c",
+        "пилотный":    "#27ae60",
+        "резервный":   "#3498db",
+        "неизвестный": "#bbb",
+    }
+    if by_block and block_dates:
         fig = go.Figure()
-        for i, (metric, records) in enumerate(ts_by_metric.items()):
-            ts_df = pd.DataFrame(records)
+        for bt in BLOCK_ORDER:
+            if bt not in by_block:
+                continue
+            y_vals = [by_block[bt].get(d, 0) for d in block_dates]
             fig.add_trace(go.Bar(
-                x=ts_df["date"].astype(str),
-                y=ts_df["val"],
-                name=metric,
-                marker_color=COLORS[i % len(COLORS)],
+                x=block_dates,
+                y=y_vals,
+                name=bt,
+                marker_color=BLOCK_COLORS_TIMELINE.get(bt, "#aaa"),
             ))
         fig.update_layout(
             barmode="stack",
-            title="Динамика ошибок по дням",
+            title="Динамика ошибок по дням (в разрезе блоков)",
             height=380,
             legend=dict(orientation="h", y=-0.2),
             margin=dict(l=40, r=20, t=50, b=80),
@@ -46,60 +58,86 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             yaxis_title="Кол-во событий (val)",
         )
         charts["timeline"] = fig.to_html(full_html=False, include_plotlyjs=False)
+    else:
+        # fallback: by metric_name
+        trends = results.get("trends", {})
+        ts_by_metric = trends.get("timeseries", {})
+        if ts_by_metric:
+            fig = go.Figure()
+            for i, (metric, records) in enumerate(ts_by_metric.items()):
+                ts_df = pd.DataFrame(records)
+                fig.add_trace(go.Bar(
+                    x=ts_df["date"].astype(str), y=ts_df["val"],
+                    name=metric, marker_color=COLORS[i % len(COLORS)],
+                ))
+            fig.update_layout(
+                barmode="stack", title="Динамика ошибок по дням", height=380,
+                legend=dict(orientation="h", y=-0.2),
+                margin=dict(l=40, r=20, t=50, b=80),
+                plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
+                xaxis_title="Дата", yaxis_title="Кол-во событий (val)",
+            )
+            charts["timeline"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 2. WoW deviations — top 15 horizontal bar
+    # 2. WoW deviations — top 50 sorted by |delta| desc
     wow = results.get("wow", [])
     if wow:
-        top15 = wow[:15]
+        wow_sorted = sorted(wow, key=lambda r: abs(r.get("delta", 0)), reverse=True)
+        top50 = wow_sorted[:50]
         labels = [
-            f"{r.get('metric_name','')[:20]} / {r.get('segment_name', r.get('lvl_1',''))} / {r.get('lvl_2','')[:20]}"
-            for r in top15
+            f"{r.get('segment_name', r.get('lvl_1',''))} / {r.get('lvl_2','')[:25]} / {r.get('lvl_3','')}"
+            for r in top50
         ]
-        pcts = [r["pct"] for r in top15]
-        colors = ["#e74c3c" if p > 0 else "#3498db" for p in pcts]
+        deltas = [r.get("delta", 0) for r in top50]
+        pcts = [r["pct"] for r in top50]
+        colors = ["#e74c3c" if d > 0 else "#3498db" for d in deltas]
+        text_labels = [f"{d:+,} ({p:+.0f}%)" for d, p in zip(deltas, pcts)]
         fig = go.Figure(go.Bar(
             y=labels[::-1],
-            x=pcts[::-1],
+            x=deltas[::-1],
             orientation="h",
             marker_color=colors[::-1],
-            text=[f"{p:+.0f}%" for p in pcts[::-1]],
+            text=text_labels[::-1],
             textposition="outside",
         ))
         fig.update_layout(
-            title=f"WoW отклонения (топ-15) — {top15[0]['date_from']} vs {top15[0]['date_to']}",
-            height=max(320, len(top15) * 26),
-            margin=dict(l=250, r=80, t=50, b=20),
+            title=f"WoW отклонения (топ-50 по Δval) — {top50[0]['date_from']} vs {top50[0]['date_to']}",
+            height=max(400, len(top50) * 22),
+            margin=dict(l=280, r=120, t=50, b=20),
             plot_bgcolor="#fafafa",
             paper_bgcolor="#ffffff",
-            xaxis_title="% изменение",
+            xaxis_title="Изменение (val)",
         )
         charts["wow_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 3. DoD deviations — top 15 horizontal bar
+    # 3. DoD deviations — top 50 sorted by |delta| desc
     dod = results.get("dod", [])
     if dod:
-        top15 = dod[:15]
+        dod_sorted = sorted(dod, key=lambda r: abs(r.get("delta", 0)), reverse=True)
+        top50 = dod_sorted[:50]
         labels = [
-            f"{r.get('metric_name','')[:20]} / {r.get('segment_name', r.get('lvl_1',''))} / {r.get('lvl_2','')[:20]}"
-            for r in top15
+            f"{r.get('segment_name', r.get('lvl_1',''))} / {r.get('lvl_2','')[:25]} / {r.get('lvl_3','')}"
+            for r in top50
         ]
-        pcts = [r["pct"] for r in top15]
-        colors = ["#e74c3c" if p > 0 else "#3498db" for p in pcts]
+        deltas = [r.get("delta", 0) for r in top50]
+        pcts = [r["pct"] for r in top50]
+        colors = ["#e74c3c" if d > 0 else "#3498db" for d in deltas]
+        text_labels = [f"{d:+,} ({p:+.0f}%)" for d, p in zip(deltas, pcts)]
         fig = go.Figure(go.Bar(
             y=labels[::-1],
-            x=pcts[::-1],
+            x=deltas[::-1],
             orientation="h",
             marker_color=colors[::-1],
-            text=[f"{p:+.0f}%" for p in pcts[::-1]],
+            text=text_labels[::-1],
             textposition="outside",
         ))
         fig.update_layout(
-            title=f"DoD отклонения (топ-15) — {top15[0]['date_from']} vs {top15[0]['date_to']}",
-            height=max(320, len(top15) * 26),
-            margin=dict(l=250, r=80, t=50, b=20),
+            title=f"DoD отклонения (топ-50 по Δval) — {top50[0]['date_from']} vs {top50[0]['date_to']}",
+            height=max(400, len(top50) * 22),
+            margin=dict(l=280, r=120, t=50, b=20),
             plot_bgcolor="#fafafa",
             paper_bgcolor="#ffffff",
-            xaxis_title="% изменение",
+            xaxis_title="Изменение (val)",
         )
         charts["dod_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
@@ -373,7 +411,7 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
 
 def _render_html(summary: dict, results: dict, charts: dict) -> str:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    anomalies = results.get("anomalies", [])
+    anomalies = sorted(results.get("anomalies", []), key=lambda a: a.get("timestamp", ""))
     wow = results.get("wow", [])
     dod = results.get("dod", [])
     trends = results.get("trends", {})
@@ -667,7 +705,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <th>Дата</th><th>Метрика</th><th>Канал</th><th>Сегмент</th>
         <th>Продукт</th><th>Блок</th><th>val</th><th>Порог</th><th>Z</th><th>Уровень</th>
       </tr>
-      {% for a in anomalies[:30] %}
+      {% for a in anomalies %}
       <tr>
         <td>{{ a.timestamp }}</td>
         <td>{{ a.metric_name }}</td>
@@ -686,9 +724,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       </tr>
       {% endfor %}
     </table>
-    {% if anomalies | length > 30 %}
-    <div style="color:#888;font-size:0.82rem;padding:10px;">... и ещё {{ anomalies | length - 30 }} записей</div>
-    {% endif %}
     {% else %}
     <div class="empty-state">✅ Аномалий не обнаружено</div>
     {% endif %}

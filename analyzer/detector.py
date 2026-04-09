@@ -333,10 +333,25 @@ def detect_channel_breakdown(df: pd.DataFrame) -> dict:
     )
     by_channel_total = {k: int(v) for k, v in by_channel_total.items()}
 
+    # by block_type per day (for timeline chart)
+    bt_day = (
+        df2.groupby(["date", "block_type"])["val"]
+        .sum()
+        .reset_index()
+    )
+    by_block = {}
+    for bt, grp in bt_day.groupby("block_type"):
+        by_block[bt] = {d: int(v) for d, v in grp.set_index("date")["val"].items()}
+
+    # all dates sorted
+    all_dates = sorted(df2["date"].unique())
+
     return {
         "by_channel_per_day": {k: {d: int(v) for d, v in vv.items()} for k, vv in by_channel.items()},
         "by_channel_total": by_channel_total,
         "by_segment_total": by_segment,
+        "by_block_per_day": by_block,
+        "dates": all_dates,
     }
 
 
