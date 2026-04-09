@@ -79,67 +79,75 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             )
             charts["timeline"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 2. WoW deviations — top 50 sorted by |delta| desc
+    def _group_by_product(items):
+        """Aggregate deviations by (segment, lvl_2): sum val_curr/val_prev, recalc delta/pct."""
+        from collections import defaultdict
+        agg = defaultdict(lambda: {"val_curr": 0, "val_prev": 0, "segment": "", "date_from": "", "date_to": ""})
+        for r in items:
+            key = (r.get("segment_name", r.get("lvl_1", "")), r.get("lvl_2", ""))
+            agg[key]["val_curr"] += r.get("val_curr", 0)
+            agg[key]["val_prev"] += r.get("val_prev", 0)
+            agg[key]["segment"] = r.get("segment_name", r.get("lvl_1", ""))
+            agg[key]["date_from"] = r.get("date_from", "")
+            agg[key]["date_to"] = r.get("date_to", "")
+        result = []
+        for (seg, prod), v in agg.items():
+            delta = v["val_curr"] - v["val_prev"]
+            pct = round((delta / v["val_prev"]) * 100, 1) if v["val_prev"] > 0 else 0
+            result.append({
+                "segment": seg, "lvl_2": prod,
+                "val_curr": v["val_curr"], "val_prev": v["val_prev"],
+                "delta": delta, "pct": pct,
+                "date_from": v["date_from"], "date_to": v["date_to"],
+            })
+        return sorted(result, key=lambda x: abs(x["delta"]), reverse=True)
+
+    def _deviation_bar(grouped, title, chart_key):
+        if not grouped:
+            return
+        top50 = grouped[:50]
+        labels = [f"{r['segment']} / {r['lvl_2']}" for r in top50]
+        deltas = [r["delta"] for r in top50]
+        pcts = [r["pct"] for r in top50]
+        colors = ["#e74c3c" if d > 0 else "#3498db" for d in deltas]
+        text_labels = [f"{d:+,} ({p:+.0f}%)" for d, p in zip(deltas, pcts)]
+        fig = go.Figure(go.Bar(
+            y=labels[::-1], x=deltas[::-1],
+            orientation="h",
+            marker_color=colors[::-1],
+            text=text_labels[::-1],
+            textposition="outside",
+        ))
+        fig.update_layout(
+            title=title,
+            height=max(400, len(top50) * 22),
+            margin=dict(l=240, r=130, t=50, b=20),
+            plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
+            xaxis_title="Изменение (Δval)",
+        )
+        charts[chart_key] = fig.to_html(full_html=False, include_plotlyjs=False)
+
+    # 2. WoW deviations — grouped by product, top 50 by |delta|
     wow = results.get("wow", [])
     if wow:
-        wow_sorted = sorted(wow, key=lambda r: abs(r.get("delta", 0)), reverse=True)
-        top50 = wow_sorted[:50]
-        labels = [
-            f"{r.get('segment_name', r.get('lvl_1',''))} / {r.get('lvl_2','')[:25]} / {r.get('lvl_3','')}"
-            for r in top50
-        ]
-        deltas = [r.get("delta", 0) for r in top50]
-        pcts = [r["pct"] for r in top50]
-        colors = ["#e74c3c" if d > 0 else "#3498db" for d in deltas]
-        text_labels = [f"{d:+,} ({p:+.0f}%)" for d, p in zip(deltas, pcts)]
-        fig = go.Figure(go.Bar(
-            y=labels[::-1],
-            x=deltas[::-1],
-            orientation="h",
-            marker_color=colors[::-1],
-            text=text_labels[::-1],
-            textposition="outside",
-        ))
-        fig.update_layout(
-            title=f"WoW отклонения (топ-50 по Δval) — {top50[0]['date_from']} vs {top50[0]['date_to']}",
-            height=max(400, len(top50) * 22),
-            margin=dict(l=280, r=120, t=50, b=20),
-            plot_bgcolor="#fafafa",
-            paper_bgcolor="#ffffff",
-            xaxis_title="Изменение (val)",
+        wow_grouped = _group_by_product(wow)
+        d0 = wow[0]
+        _deviation_bar(
+            wow_grouped,
+            f"WoW отклонения по продуктам (топ-50) — {d0['date_from']} vs {d0['date_to']}",
+            "wow_bar",
         )
-        charts["wow_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 3. DoD deviations — top 50 sorted by |delta| desc
+    # 3. DoD deviations — grouped by product, top 50 by |delta|
     dod = results.get("dod", [])
     if dod:
-        dod_sorted = sorted(dod, key=lambda r: abs(r.get("delta", 0)), reverse=True)
-        top50 = dod_sorted[:50]
-        labels = [
-            f"{r.get('segment_name', r.get('lvl_1',''))} / {r.get('lvl_2','')[:25]} / {r.get('lvl_3','')}"
-            for r in top50
-        ]
-        deltas = [r.get("delta", 0) for r in top50]
-        pcts = [r["pct"] for r in top50]
-        colors = ["#e74c3c" if d > 0 else "#3498db" for d in deltas]
-        text_labels = [f"{d:+,} ({p:+.0f}%)" for d, p in zip(deltas, pcts)]
-        fig = go.Figure(go.Bar(
-            y=labels[::-1],
-            x=deltas[::-1],
-            orientation="h",
-            marker_color=colors[::-1],
-            text=text_labels[::-1],
-            textposition="outside",
-        ))
-        fig.update_layout(
-            title=f"DoD отклонения (топ-50 по Δval) — {top50[0]['date_from']} vs {top50[0]['date_to']}",
-            height=max(400, len(top50) * 22),
-            margin=dict(l=280, r=120, t=50, b=20),
-            plot_bgcolor="#fafafa",
-            paper_bgcolor="#ffffff",
-            xaxis_title="Изменение (val)",
+        dod_grouped = _group_by_product(dod)
+        d0 = dod[0]
+        _deviation_bar(
+            dod_grouped,
+            f"DoD отклонения по продуктам (топ-50) — {d0['date_from']} vs {d0['date_to']}",
+            "dod_bar",
         )
-        charts["dod_bar"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
     # 4. Top-20 services horizontal bar
     top_services = results.get("top_services", [])
