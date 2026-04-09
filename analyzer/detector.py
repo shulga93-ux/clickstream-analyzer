@@ -435,6 +435,22 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
             block_matrix[p][bt] = {}
         block_matrix[p][bt][d] = v
 
+    # ── Drill-down: product × lvl_4 × date (для Статусного экрана 55558) ──────
+    lvl4_matrix = {}
+    if "lvl_4" in df2.columns and df2["lvl_4"].notna().any():
+        daily_lvl4 = (
+            df2[df2["lvl_2"].isin(product_names) & df2["lvl_4"].notna()]
+            .groupby(["lvl_2", "lvl_4", "date"])["val"]
+            .sum()
+            .reset_index()
+        )
+        lvl4_matrix = {p: {} for p in product_names}
+        for _, row in daily_lvl4.iterrows():
+            p, lv, d, v = row["lvl_2"], str(row["lvl_4"]), row["date"], int(row["val"])
+            if lv not in lvl4_matrix[p]:
+                lvl4_matrix[p][lv] = {}
+            lvl4_matrix[p][lv][d] = v
+
     # ── Drill-down: product × channel × date ─────────────────────────────────
     daily_channel = (
         df2[df2["lvl_2"].isin(product_names)]
@@ -494,6 +510,7 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
         "products": products_meta,
         "matrix": matrix,
         "block_matrix": block_matrix,
+        "lvl4_matrix": lvl4_matrix,
         "channel_matrix": channel_matrix,
         "dod_pct": dod_pct,
         "wow_pct": wow_pct,

@@ -207,25 +207,43 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
         )
         charts["trend_lines"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
-    # 9. Product drill-down: dropdown selector → bar chart by block_type per day
+    # 9. Product drill-down: dropdown selector → bar chart by block_type or lvl_4 per day
     pd_data = results.get("product_dynamics", {})
     block_matrix = pd_data.get("block_matrix", {})
+    lvl4_matrix = pd_data.get("lvl4_matrix", {})
     channel_matrix = pd_data.get("channel_matrix", {})
     dates_pd = pd_data.get("dates", [])
     products_meta = pd_data.get("products", [])
 
-    if block_matrix and dates_pd and products_meta:
+    # Use lvl_4 breakdown if available (metric 55558), otherwise block_type
+    use_lvl4 = bool(lvl4_matrix and any(lvl4_matrix.values()))
+    primary_matrix = lvl4_matrix if use_lvl4 else block_matrix
+
+    if primary_matrix and dates_pd and products_meta:
         BLOCK_COLORS = {
-            "боевой":    "#e74c3c",
-            "пилотный":  "#27ae60",
-            "резервный": "#3498db",
-            "неизвестный": "#aaa",
+            "боевой":       "#e74c3c",
+            "пилотный":     "#27ae60",
+            "резервный":    "#3498db",
+            "неизвестный":  "#aaa",
+        }
+        LVL4_COLORS = {
+            "Ошибка":         "#e74c3c",
+            "Ожидание":       "#f39c12",
+            "Информирование": "#3498db",
+            "Успех":          "#27ae60",
         }
         CHANNEL_COLORS = {
             "iPad (Планшеты)": "#9b59b6",
-            "Web (АРМ)":       "#f39c12",
+            "Web (АРМ)":       "#e67e22",
         }
-        block_types = ["боевой", "пилотный", "резервный", "неизвестный"]
+        if use_lvl4:
+            primary_keys = ["Ошибка", "Ожидание", "Информирование", "Успех"]
+            primary_colors = LVL4_COLORS
+            group_label = "Тип экрана"
+        else:
+            primary_keys = ["боевой", "пилотный", "резервный", "неизвестный"]
+            primary_colors = BLOCK_COLORS
+            group_label = "Тип блока"
         channel_names = ["Web (АРМ)", "iPad (Планшеты)"]
 
         traces = []
@@ -237,17 +255,17 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             p = pm["name"]
             product_traces = []
 
-            # Block traces
-            for bt in block_types:
-                bdata = block_matrix.get(p, {}).get(bt, {})
-                y_vals = [bdata.get(d, 0) for d in dates_pd]
+            # Primary breakdown traces (block_type or lvl_4)
+            for key in primary_keys:
+                kdata = primary_matrix.get(p, {}).get(key, {})
+                y_vals = [kdata.get(d, 0) for d in dates_pd]
                 if sum(y_vals) == 0:
                     continue
                 product_traces.append({
                     "x": dates_pd, "y": y_vals,
-                    "name": bt, "type": "bar",
-                    "marker_color": BLOCK_COLORS.get(bt, "#aaa"),
-                    "legendgroup": bt,
+                    "name": key, "type": "bar",
+                    "marker_color": primary_colors.get(key, "#aaa"),
+                    "legendgroup": key,
                     "showlegend": True,
                 })
 
@@ -316,7 +334,7 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
                 method="update",
                 args=[
                     {"visible": vis, "showlegend": vis},
-                    {"title": f"📦 {pm['name']} — ошибки по блокам  |  {dod_str}  ·  {wow_str}  |  Σ {pm['total_val']:,}"},
+                    {"title": f"📦 {pm['name']} — по {group_label.lower()}  |  {dod_str}  ·  {wow_str}  |  Σ {pm['total_val']:,}"},
                 ],
             ))
 
@@ -325,15 +343,15 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
         dod_str0 = f"DoD {first['dod_pct']:+.1f}%" if first.get("dod_pct") is not None else "DoD —"
         wow_str0 = f"WoW {first['wow_pct']:+.1f}%" if first.get("wow_pct") is not None else "WoW —"
         fig.update_layout(
-            title=f"📦 {first['name']} — ошибки по блокам  |  {dod_str0}  ·  {wow_str0}  |  Σ {first['total_val']:,}",
+            title=f"📦 {first['name']} — по {group_label.lower()}  |  {dod_str0}  ·  {wow_str0}  |  Σ {first['total_val']:,}",
             barmode="stack",
             height=440,
             margin=dict(l=40, r=40, t=90, b=60),
             plot_bgcolor="#fafafa",
             paper_bgcolor="#ffffff",
             xaxis_title="Дата",
-            yaxis=dict(title="Кол-во ошибок (блоки)", side="left"),
-            yaxis2=dict(title="Кол-во ошибок (каналы)", overlaying="y", side="right", showgrid=False),
+            yaxis=dict(title=f"Кол-во событий ({group_label})", side="left"),
+            yaxis2=dict(title="Кол-во событий (каналы)", overlaying="y", side="right", showgrid=False),
             legend=dict(orientation="h", y=-0.18),
             updatemenus=[dict(
                 buttons=buttons,
