@@ -207,6 +207,36 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
         )
         charts["trend_lines"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
+    # 9. Product dynamics heatmap (top products × dates)
+    pd_data = results.get("product_dynamics", {})
+    matrix = pd_data.get("matrix", {})
+    dates_pd = pd_data.get("dates", [])
+    products_meta = pd_data.get("products", [])
+    if matrix and dates_pd and products_meta:
+        product_names = [p["name"] for p in products_meta]
+        # z[i] = row for product i, values per date
+        z = []
+        for p in product_names:
+            row = [matrix[p].get(d, 0) for d in dates_pd]
+            z.append(row)
+        fig = go.Figure(go.Heatmap(
+            z=z,
+            x=dates_pd,
+            y=product_names,
+            colorscale="YlOrRd",
+            hoverongaps=False,
+            hovertemplate="<b>%{y}</b><br>%{x}: %{z:,}<extra></extra>",
+            colorbar=dict(title="val"),
+        ))
+        fig.update_layout(
+            title="Динамика ошибок по продуктам (топ-40)",
+            height=max(500, len(product_names) * 18),
+            margin=dict(l=200, r=40, t=50, b=60),
+            xaxis_title="Дата",
+            yaxis=dict(autorange="reversed"),
+        )
+        charts["product_heatmap"] = fig.to_html(full_html=False, include_plotlyjs=False)
+
     return charts
 
 
@@ -221,6 +251,8 @@ def _render_html(summary: dict, results: dict, charts: dict) -> str:
     top_services = results.get("top_services", [])
     ss = results.get("status_screen", {})
 
+    pd_data = results.get("product_dynamics", {})
+
     template = Template(HTML_TEMPLATE)
     return template.render(
         generated_at=generated_at,
@@ -232,6 +264,7 @@ def _render_html(summary: dict, results: dict, charts: dict) -> str:
         top_services=top_services,
         ss=ss,
         charts=charts,
+        pd_data=pd_data,
     )
 
 
@@ -402,6 +435,59 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       {% endif %}
     </div>
   </div>
+
+  <!-- Product heatmap: top-40 products × dates -->
+  {% if charts.product_heatmap %}
+  <div class="section">
+    <h2>🗓️ Динамика по продуктам день за днём</h2>
+    <p style="color:#888;font-size:0.85rem;margin-bottom:12px;">
+      Тепловая карта: чем темнее — тем больше ошибок. Наведите на ячейку для деталей.
+    </p>
+    {{ charts.product_heatmap }}
+    {% if pd_data.products %}
+    <div style="margin-top:16px;overflow-x:auto;">
+      <table class="stat-table">
+        <thead>
+          <tr>
+            <th>Продукт</th>
+            <th>Сегмент</th>
+            <th>Тип ошибки</th>
+            <th>Σ val</th>
+            <th>DoD ({{ pd_data.last_date }})</th>
+            <th>WoW ({{ pd_data.last_date }})</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for p in pd_data.products %}
+        {% set dod_v = pd_data.dod_pct.get(p.name) %}
+        {% set wow_v = pd_data.wow_pct.get(p.name) %}
+        <tr>
+          <td><strong>{{ p.name }}</strong></td>
+          <td>{{ p.segment }}</td>
+          <td style="color:#888;font-size:0.82rem;">{{ p.metric_name }}</td>
+          <td>{{ "{:,}".format(p.total_val) }}</td>
+          <td>
+            {% if dod_v is not none %}
+              <span style="color:{{ '#e74c3c' if dod_v > 0 else '#27ae60' }};font-weight:600;">
+                {{ '+' if dod_v > 0 else '' }}{{ dod_v }}%
+              </span>
+            {% else %}<span style="color:#bbb">—</span>{% endif %}
+          </td>
+          <td>
+            {% if wow_v is not none %}
+              <span style="color:{{ '#e74c3c' if wow_v > 0 else '#27ae60' }};font-weight:600;">
+                {{ '+' if wow_v > 0 else '' }}{{ wow_v }}%
+              </span>
+            {% else %}<span style="color:#bbb">—</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <!-- Top-20 services -->
   {% if charts.services_bar %}

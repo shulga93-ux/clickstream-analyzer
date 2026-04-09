@@ -65,6 +65,7 @@ def detect_all(df: pd.DataFrame) -> dict:
     results["top_services"] = detect_top_services(df)
     results["channel_breakdown"] = detect_channel_breakdown(df)
     results["status_screen"] = detect_status_screen(df)
+    results["product_dynamics"] = detect_product_dynamics(df)
     # backward-compat aliases
     results["deviations"] = results["dod"]
     return results
@@ -374,4 +375,88 @@ def detect_status_screen(df: pd.DataFrame) -> dict:
         "total": total,
         "by_day": by_day,
         "total_val": int(ss["val"].sum()),
+    }
+
+
+# ─── Product dynamics (heatmap data) ─────────────────────────────────────────
+
+def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
+    """
+    Build per-product (lvl_2) daily val matrix for heatmap.
+    Returns top_n products by total val, with:
+      - dates: sorted list of date strings
+      - products: list of {name, total_val, metric_name, segment}
+      - matrix: dict {product_name: {date: val}}
+      - dod_pct: dict {product_name: pct_change D vs D-1 for last date}
+      - wow_pct: dict {product_name: pct_change D vs D-7 for last date}
+    """
+    df2 = df.copy()
+    df2["date"] = df2["report_dt"].dt.date.astype(str)
+
+    # Top products by total val
+    top_products = (
+        df2.groupby(["lvl_2", "metric_name", "segment_name"])["val"]
+        .sum()
+        .reset_index()
+        .sort_values("val", ascending=False)
+    )
+    # Keep one row per lvl_2 (primary metric/segment)
+    top_products = top_products.drop_duplicates("lvl_2").head(top_n)
+    product_names = top_products["lvl_2"].tolist()
+
+    # Daily totals per product
+    daily = (
+        df2.groupby(["lvl_2", "date"])["val"]
+        .sum()
+        .reset_index()
+    )
+    daily = daily[daily["lvl_2"].isin(product_names)]
+
+    dates = sorted(daily["date"].unique())
+
+    # Build matrix
+    matrix = {p: {} for p in product_names}
+    for _, row in daily.iterrows():
+        matrix[row["lvl_2"]][row["date"]] = int(row["val"])
+
+    # DoD and WoW for last date
+    last_date = dates[-1] if dates else None
+    dod_pct = {}
+    wow_pct = {}
+
+    if last_date and len(dates) >= 2:
+        prev_date = dates[-2]
+        for p in product_names:
+            curr = matrix[p].get(last_date, 0)
+            prev = matrix[p].get(prev_date, 0)
+            if prev > 0:
+                dod_pct[p] = round((curr - prev) / prev * 100, 1)
+
+    if last_date:
+        import datetime as _dt
+        last_dt = _dt.date.fromisoformat(last_date)
+        wow_date = str(last_dt - _dt.timedelta(days=7))
+        if wow_date in dates:
+            for p in product_names:
+                curr = matrix[p].get(last_date, 0)
+                prev = matrix[p].get(wow_date, 0)
+                if prev > 0:
+                    wow_pct[p] = round((curr - prev) / prev * 100, 1)
+
+    products_meta = []
+    for _, row in top_products.iterrows():
+        products_meta.append({
+            "name": str(row["lvl_2"]),
+            "total_val": int(row["val"]),
+            "metric_name": str(row["metric_name"]),
+            "segment": str(row["segment_name"]),
+        })
+
+    return {
+        "dates": dates,
+        "products": products_meta,
+        "matrix": matrix,
+        "dod_pct": dod_pct,
+        "wow_pct": wow_pct,
+        "last_date": last_date,
     }
