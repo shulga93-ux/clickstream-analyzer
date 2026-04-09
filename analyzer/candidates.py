@@ -51,7 +51,11 @@ def detect_tech_error_candidates(df: pd.DataFrame, metric_id: str) -> dict:
         lambda r: round((r["delta"] / r["prev_val"]) * 100, 1) if r["prev_val"] > 0 else None,
         axis=1,
     )
-    merged["is_candidate"] = merged["pct"].apply(lambda p: p is not None and p > THRESHOLD_PCT)
+    # Резервные блоки не считаются кандидатами
+    merged["is_candidate"] = merged.apply(
+        lambda r: r["pct"] is not None and r["pct"] > THRESHOLD_PCT and r["block_type"] != "резервный",
+        axis=1,
+    )
     merged = merged.sort_values(["is_candidate", "curr_val"], ascending=[False, False])
 
     def to_row(r):
@@ -241,7 +245,10 @@ CANDIDATES_TEMPLATE = r"""
 <div class="header">
   <h1>🚨 Кандидаты в Проблемы — СБОЛ.про</h1>
   <div class="meta">
-    Сравнение последних 7 дней vs предыдущие 7 дней
+    {% set p = results.tech_error.periods %}
+    Текущий период: <strong style="color:rgba(255,255,255,0.9);">{{ p.curr_start }} → {{ p.curr_end }}</strong>
+    &nbsp;·&nbsp;
+    Предыдущий: {{ p.prev_start }} → {{ p.prev_end }}
     &nbsp;·&nbsp; Порог роста: +{{ results.tech_error.threshold_pct }}%
     &nbsp;·&nbsp; Сгенерировано: {{ generated_at }}
   </div>
@@ -256,11 +263,7 @@ CANDIDATES_TEMPLATE = r"""
     <div class="section-header">
       <span style="font-size:1.4rem;">⚠️</span>
       <h2>Тех Ошибка &nbsp;<span style="font-weight:400;color:#888;font-size:0.85rem;">metric_id 55556</span></h2>
-      <span class="period-badge">
-        Текущий: {{ p.curr_start }} → {{ p.curr_end }}
-        &nbsp;·&nbsp;
-        Предыдущий: {{ p.prev_start }} → {{ p.prev_end }}
-      </span>
+      <span class="period-badge">Резервные блоки исключены из кандидатов</span>
     </div>
 
     {% if te.all_rows %}
