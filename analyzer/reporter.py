@@ -335,49 +335,141 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
 
         total_traces = idx
 
-        # Build dropdown buttons
+        # Build visibility map per product (for JS)
+        vis_map_js = {}
         for i, pm in enumerate(products_meta):
-            vis = [False] * total_traces
-            for vi in visibility_map[i]:
-                vis[vi] = True
-            dod_str = f"DoD {pm['dod_pct']:+.1f}%" if pm.get("dod_pct") is not None else "DoD —"
-            wow_str = f"WoW {pm['wow_pct']:+.1f}%" if pm.get("wow_pct") is not None else "WoW —"
-            buttons.append(dict(
-                label=f"{pm['name']}  [{dod_str} / {wow_str}]",
-                method="update",
-                args=[
-                    {"visible": vis, "showlegend": vis},
-                    {"title": f"📦 {pm['name']} — по {group_label.lower()}  |  {dod_str}  ·  {wow_str}  |  Σ {pm['total_val']:,}"},
-                ],
-            ))
+            vis_map_js[pm["name"]] = visibility_map[i]
 
         fig = go.Figure(data=all_traces)
         first = products_meta[0]
-        dod_str0 = f"DoD {first['dod_pct']:+.1f}%" if first.get("dod_pct") is not None else "DoD —"
-        wow_str0 = f"WoW {first['wow_pct']:+.1f}%" if first.get("wow_pct") is not None else "WoW —"
         fig.update_layout(
-            title=f"📦 {first['name']} — по {group_label.lower()}  |  {dod_str0}  ·  {wow_str0}  |  Σ {first['total_val']:,}",
+            title=f"📦 {first['name']}  |  Σ {first['total_val']:,}",
             barmode="stack",
             height=440,
-            margin=dict(l=40, r=40, t=90, b=60),
+            margin=dict(l=40, r=40, t=60, b=60),
             plot_bgcolor="#fafafa",
             paper_bgcolor="#ffffff",
             xaxis_title="Дата",
             yaxis=dict(title=f"Кол-во событий ({group_label})", side="left"),
             yaxis2=dict(title="Кол-во событий (каналы)", overlaying="y", side="right", showgrid=False),
             legend=dict(orientation="h", y=-0.18),
-            updatemenus=[dict(
-                buttons=buttons,
-                direction="down",
-                showactive=True,
-                x=0.0, xanchor="left",
-                y=1.18, yanchor="top",
-                bgcolor="#ffffff",
-                bordercolor="#d0d7de",
-                font=dict(size=12),
-            )],
         )
-        charts["product_drill"] = fig.to_html(full_html=False, include_plotlyjs=False)
+        fig_html = fig.to_html(full_html=False, include_plotlyjs=False)
+
+        # Prepare JS data: per-product metadata for table + visibility
+        import json as _json
+        js_data = {
+            "visMap": vis_map_js,
+            "totalTraces": total_traces,
+            "products": {pm["name"]: {
+                "total_val": pm["total_val"],
+                "segment": pm["segment"],
+                "metric_name": pm["metric_name"],
+                "dod_pct": pm.get("dod_pct"),
+                "dod_delta": pm.get("dod_delta"),
+                "wow_pct": pm.get("wow_pct"),
+                "wow_delta": pm.get("wow_delta"),
+                "last_val": pm.get("last_val", 0),
+                "last_date": pd_data.get("last_date", ""),
+            } for pm in products_meta},
+            "productOrder": [pm["name"] for pm in products_meta],
+            "groupLabel": group_label,
+        }
+        js_data_str = _json.dumps(js_data, ensure_ascii=False)
+
+        # Build select options
+        select_opts = ""
+        for pm in products_meta:
+            dod_str = f"DoD {pm['dod_pct']:+.1f}%" if pm.get("dod_pct") is not None else "DoD —"
+            wow_str = f"WoW {pm['wow_pct']:+.1f}%" if pm.get("wow_pct") is not None else "WoW —"
+            select_opts += f'<option value="{pm["name"]}">{pm["name"]}  [{dod_str} / {wow_str}]</option>\n'
+
+        drill_uid = "drill_" + str(abs(hash(str(products_meta[0]))))[:8]
+
+        charts["product_drill"] = f"""
+<div id="{drill_uid}_wrap">
+  <div style="margin-bottom:10px;">
+    <label style="font-size:0.85rem;color:#555;margin-right:8px;font-weight:600;">Продукт:</label>
+    <select id="{drill_uid}_sel" onchange="drillUpdate_{drill_uid}(this.value)"
+            style="padding:6px 12px;border-radius:6px;border:1.5px solid #d0d7de;
+                   font-size:0.9rem;min-width:340px;cursor:pointer;">
+      {select_opts}
+    </select>
+  </div>
+  <div id="{drill_uid}_chart">{fig_html}</div>
+  <div id="{drill_uid}_table" style="margin-top:16px;overflow-x:auto;"></div>
+</div>
+<script>
+(function() {{
+  const UID = "{drill_uid}";
+  const D = {js_data_str};
+
+  function fmtNum(n) {{ return n == null ? "—" : n.toLocaleString("ru-RU"); }}
+  function fmtPct(p) {{ return p == null ? "—" : (p > 0 ? "+" : "") + p.toFixed(1) + "%"; }}
+  function pctColor(p) {{ return p == null ? "#999" : (p > 0 ? "#e74c3c" : "#3498db"); }}
+
+  function buildTable(name) {{
+    const pm = D.products[name];
+    if (!pm) return "";
+    const dodColor = pctColor(pm.dod_pct);
+    const wowColor = pctColor(pm.wow_pct);
+    return `
+      <table style="width:100%;border-collapse:collapse;font-size:0.88rem;">
+        <thead>
+          <tr style="background:#f8f9fa;text-transform:uppercase;font-size:0.74rem;color:#888;">
+            <th style="padding:8px 10px;text-align:left;">Показатель</th>
+            <th style="padding:8px 10px;text-align:right;">Значение</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;">Продукт</td>
+              <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;font-weight:700;">${{name}}</td></tr>
+          <tr><td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;">Сегмент</td>
+              <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;">${{pm.segment}}</td></tr>
+          <tr><td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;">Суммарный val (период)</td>
+              <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;font-weight:700;">${{fmtNum(pm.total_val)}}</td></tr>
+          <tr><td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;">Последний день (${{pm.last_date}})</td>
+              <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;">${{fmtNum(pm.last_val)}}</td></tr>
+          <tr><td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;">DoD ${{D.groupLabel}} (${{pm.last_date}})</td>
+              <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;font-weight:700;color:${{dodColor}};">
+                ${{pm.dod_delta != null ? (pm.dod_delta > 0 ? "+" : "") + fmtNum(pm.dod_delta) + " (" + fmtPct(pm.dod_pct) + ")" : "—"}}
+              </td></tr>
+          <tr><td style="padding:7px 10px;">WoW ${{D.groupLabel}} (${{pm.last_date}} vs -7д)</td>
+              <td style="padding:7px 10px;text-align:right;font-weight:700;color:${{wowColor}};">
+                ${{pm.wow_delta != null ? (pm.wow_delta > 0 ? "+" : "") + fmtNum(pm.wow_delta) + " (" + fmtPct(pm.wow_pct) + ")" : "—"}}
+              </td></tr>
+        </tbody>
+      </table>`;
+  }}
+
+  function updatePlotly(name) {{
+    const chartDiv = document.querySelector("#{drill_uid}_chart .js-plotly-plot");
+    if (!chartDiv) return;
+    const visIndices = D.visMap[name] || [];
+    const vis = Array(D.totalTraces).fill(false);
+    visIndices.forEach(i => vis[i] = true);
+    const pm = D.products[name];
+    Plotly.update(chartDiv,
+      {{"visible": vis}},
+      {{"title.text": "📦 " + name + "  |  Σ " + fmtNum(pm.total_val)}}
+    );
+  }}
+
+  window["drillUpdate_" + UID] = function(name) {{
+    updatePlotly(name);
+    document.getElementById(UID + "_table").innerHTML = buildTable(name);
+  }};
+
+  // Init on load
+  document.addEventListener("DOMContentLoaded", function() {{
+    const sel = document.getElementById(UID + "_sel");
+    if (sel) {{
+      window["drillUpdate_" + UID](sel.value);
+    }}
+  }});
+}})();
+</script>
+"""
 
     return charts
 

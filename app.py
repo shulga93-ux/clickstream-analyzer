@@ -64,8 +64,20 @@ def upload():
             if df_m.empty:
                 continue
 
-            summary = get_summary(df_m)
-            results = detect_all(df_m)
+            # For Статусный экран: timeline/WoW/DoD only on lvl_4=="Ошибка"
+            # but product_dynamics uses full df_m (all lvl_4 types)
+            if metric_id == "55558":
+                df_analysis = df_m[df_m["lvl_4"] == "Ошибка"].copy()
+            else:
+                df_analysis = df_m
+
+            summary = get_summary(df_analysis)
+            results = detect_all(df_analysis)
+
+            # Override product_dynamics with full df (all lvl_4 types) for 55558
+            if metric_id == "55558":
+                from analyzer.detector import detect_product_dynamics
+                results["product_dynamics"] = detect_product_dynamics(df_m)
 
             slug = str(metric_id)
             report_filename = f"report_{upload_id}_{slug}.html"
