@@ -176,7 +176,7 @@
       el.className = "result success";
 
       const reportBtns = data.reports.map(r => {
-        const icons = {55556: "⚠️", 55557: "🔴", 55558: "🖥️"};
+        const icons = {55556: "⚠️", 55557: "🔴", 55558: "🖥️", "candidates": "🚨"};
         const icon = icons[r.metric_id] || "📊";
         const dod = r.dod_deviations > 0 ? `<span style="color:#e67e22">DoD: ${r.dod_deviations}</span>` : `<span style="color:#27ae60">DoD: 0</span>`;
         const wow = r.wow_deviations > 0 ? `<span style="color:#f39c12">WoW: ${r.wow_deviations}</span>` : `<span style="color:#27ae60">WoW: 0</span>`;
