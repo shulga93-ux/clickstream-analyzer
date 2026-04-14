@@ -207,19 +207,43 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
 
     # 8. Trends per metric (line chart)
     if ts_by_metric:
+        import numpy as _np
         fig = go.Figure()
+        per_metric = trends.get("per_metric", {})
         for i, (metric, records) in enumerate(ts_by_metric.items()):
             ts_df = pd.DataFrame(records)
+            color = COLORS[i % len(COLORS)]
+            y_vals = ts_df["val"].values.astype(float)
+            x_vals = _np.arange(len(y_vals))
+            x_labels = ts_df["date"].astype(str).tolist()
+
+            # Actual data line
             fig.add_trace(go.Scatter(
-                x=ts_df["date"].astype(str),
-                y=ts_df["val"],
+                x=x_labels, y=y_vals,
                 name=metric,
                 mode="lines+markers",
-                line=dict(color=COLORS[i % len(COLORS)], width=2),
+                line=dict(color=color, width=2),
             ))
+
+            # Trend line (linear regression)
+            if len(y_vals) >= 3:
+                slope = _np.polyfit(x_vals, y_vals, 1)
+                y_trend = _np.polyval(slope, x_vals)
+                mt = per_metric.get(metric, {})
+                pct = mt.get("pct_change_total", 0)
+                sign = "+" if pct > 0 else ""
+                fig.add_trace(go.Scatter(
+                    x=x_labels, y=y_trend,
+                    name=f"{metric} тренд ({sign}{pct}%)",
+                    mode="lines",
+                    line=dict(color=color, width=2, dash="dash"),
+                    opacity=0.6,
+                    showlegend=True,
+                ))
+
         fig.update_layout(
-            title="Тренды по типам ошибок",
-            height=340,
+            title="Тренды по типам ошибок (без воскресений)",
+            height=380,
             legend=dict(orientation="h", y=-0.2),
             margin=dict(l=40, r=20, t=50, b=80),
             plot_bgcolor="#fafafa",
