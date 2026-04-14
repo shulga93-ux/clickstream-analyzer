@@ -140,6 +140,45 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
                 )
                 charts["error_ratio"] = fig_r.to_html(full_html=False, include_plotlyjs=False)
 
+    # 1c. Non-error status types chart (Успех / Ожидание / Информирование) by day, excl Sundays
+    if "lvl_4" in df.columns:
+        df_ss_other = df[
+            (df["metric_id"].astype(str) == "55558") &
+            (df["lvl_4"].astype(str) != "Ошибка")
+        ].copy() if "lvl_4" in df.columns else pd.DataFrame()
+        if not df_ss_other.empty and "report_dt" in df_ss_other.columns:
+            df_ss_other["date"] = df_ss_other["report_dt"].dt.date
+            df_ss_other = df_ss_other[df_ss_other["date"].apply(lambda d: d.weekday() != 6)]
+            OTHER_COLORS = {
+                "Успех":          "#27ae60",
+                "Ожидание":       "#f39c12",
+                "Информирование": "#3498db",
+            }
+            other_keys = ["Успех", "Ожидание", "Информирование"]
+            fig_other = go.Figure()
+            for key in other_keys:
+                grp = df_ss_other[df_ss_other["lvl_4"].astype(str) == key]
+                if grp.empty:
+                    continue
+                daily = grp.groupby("date")["val"].sum().reset_index().sort_values("date")
+                daily["date"] = daily["date"].astype(str)
+                fig_other.add_trace(go.Bar(
+                    x=daily["date"], y=daily["val"], name=key,
+                    marker_color=OTHER_COLORS.get(key, "#aaa"),
+                ))
+            fig_other.update_layout(
+                barmode="stack",
+                title="Динамика статусного экрана по дням — Успех / Ожидание / Информирование (без воскресений)",
+                height=360,
+                legend=dict(orientation="h", y=-0.2),
+                margin=dict(l=40, r=20, t=50, b=80),
+                plot_bgcolor="#fafafa",
+                paper_bgcolor="#ffffff",
+                xaxis_title="Дата",
+                yaxis_title="Кол-во событий (val)",
+            )
+            charts["other_status_chart"] = fig_other.to_html(full_html=False, include_plotlyjs=False)
+
     def _group_by_product(items):
         """Aggregate deviations by (segment, lvl_2): sum val_curr/val_prev, recalc delta/pct."""
         from collections import defaultdict
@@ -413,7 +452,7 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             "Web (АРМ)":       "#e67e22",
         }
         if use_lvl4:
-            primary_keys = ["Ошибка", "Ожидание", "Информирование", "Успех"]
+            primary_keys = ["Ошибка"]
             primary_colors = LVL4_COLORS
             group_label = "Тип экрана"
         else:
@@ -444,6 +483,27 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
                     "legendgroup": key,
                     "showlegend": True,
                 })
+
+            # Ошибка/Успех ratio line (only for lvl4 mode)
+            if use_lvl4:
+                err_data = primary_matrix.get(p, {}).get("Ошибка", {})
+                suc_data = lvl4_matrix.get(p, {}).get("Успех", {})
+                ratio_vals = []
+                for d in dates_pd:
+                    e = err_data.get(d, 0)
+                    s = suc_data.get(d, 0)
+                    ratio_vals.append(round(e / s * 100, 1) if s > 0 else None)
+                if any(v is not None and v > 0 for v in ratio_vals):
+                    product_traces.append({
+                        "x": dates_pd, "y": ratio_vals,
+                        "name": "Ошибка/Успех (%)", "type": "scatter",
+                        "mode": "lines+markers",
+                        "line": {"color": "#c0392b", "width": 2, "dash": "dot"},
+                        "marker": {"size": 5},
+                        "legendgroup": "ratio",
+                        "showlegend": True,
+                        "yaxis": "y2",
+                    })
 
             # Channel lines (secondary axis)
             for ch in channel_names:
@@ -607,7 +667,7 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
     visIndices.forEach(i => vis[i] = true);
     const pm = D.products[name];
     Plotly.update(chartDiv,
-      {{"visible": vis}},
+      {{"visible": vis, "showlegend": vis}},
       {{"title.text": "📦 " + name + "  |  Σ " + fmtNum(pm.total_val)}}
     );
   }}
@@ -977,6 +1037,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
   {% endif %}
 
+  {% if charts.other_status_chart %}
+  <div class="section">
+    <h2>✅ Статусный экран — динамика Успех / Ожидание / Информирование</h2>
+    {{ charts.other_status_chart }}
+  </div>
+  {% endif %}
+
   <!-- DoD section (full width) -->
   <div class="section">
     <h2>📆 Топ-50 DoD отклонений — день недели к тому же дню предыдущей недели
@@ -992,9 +1059,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <!-- Product drill-down: dropdown → bar by block_type + channel lines -->
   {% if charts.product_drill %}
   <div class="section">
-    <h2>🗓️ Динамика по продукту день за днём</h2>
+    <h2>🗓️ Динамика ОШИБОК по продукту день за днём</h2>
     <p style="color:#888;font-size:0.85rem;margin-bottom:12px;">
-      Выберите продукт из списка — увидите динамику ошибок по блокам (боевой / пилотный / резервный) и каналам.
+      Выберите продукт из списка — увидите динамику ошибок (столбцы) и отношение Ошибка/Успех % (пунктирная линия).
     </p>
     {{ charts.product_drill }}
     {% if pd_data.products %}
