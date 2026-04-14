@@ -605,10 +605,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <div class="value">{{ summary.unique_services }}</div>
       <div class="label">Сервисов (log_name)</div>
     </div>
-    <div class="kpi-card">
-      <div class="value" style="color: #e74c3c;">{{ anomalies | length }}</div>
-      <div class="label">Аномалий (IQR×3)</div>
-    </div>
+
     <div class="kpi-card">
       <div class="value" style="color: #f39c12;">{{ wow | length }}</div>
       <div class="label">WoW отклонений</div>
@@ -1041,38 +1038,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
   {% endif %}
 
-  <!-- Anomalies table -->
-  <div class="section">
-    <h2>⚡ Аномальные значения (IQR×3) — {{ anomalies | length }}</h2>
-    {% if anomalies %}
-    <table class="stat-table">
-      <tr>
-        <th>Дата</th><th>Метрика</th><th>Канал</th><th>Сегмент</th>
-        <th>Продукт</th><th>Блок</th><th>val</th><th>Порог</th><th>Z</th><th>Уровень</th>
-      </tr>
-      {% for a in anomalies %}
-      <tr>
-        <td>{{ a.timestamp }}</td>
-        <td>{{ a.metric_name }}</td>
-        <td>{{ a.channel_name }}</td>
-        <td>{{ a.segment_name }}</td>
-        <td>{{ a.lvl_2 }}</td>
-        <td>{{ a.block_type }}</td>
-        <td><strong>{{ "{:,}".format(a.val) }}</strong></td>
-        <td>{{ "{:,.0f}".format(a.threshold) }}</td>
-        <td>{{ a.zscore }}</td>
-        <td>
-          <span class="badge {{ 'badge-red' if a.severity == 'high' else 'badge-orange' }}">
-            {{ a.severity }}
-          </span>
-        </td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% else %}
-    <div class="empty-state">✅ Аномалий не обнаружено</div>
-    {% endif %}
-  </div>
 
   <!-- Trends -->
   <div class="section">
