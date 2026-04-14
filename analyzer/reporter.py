@@ -21,12 +21,9 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
     COLORS = px.colors.qualitative.Set2
     COLORS_SEQ = px.colors.sequential.Blues
 
-    # 1. Stacked bar: total val by day, stacked by block_type
+    # 1. Stacked bar: статусные экраны (55558) с типом "Ошибка" по дням, в разрезе блоков
     trends = results.get("trends", {})
     ts_by_metric = trends.get("timeseries", {})
-    ch_data = results.get("channel_breakdown", {})
-    by_block = ch_data.get("by_block_per_day", {})
-    block_dates = ch_data.get("dates", [])
     BLOCK_ORDER = ["боевой", "пилотный", "резервный", "неизвестный"]
     BLOCK_COLORS_TIMELINE = {
         "боевой":      "#e74c3c",
@@ -34,45 +31,60 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
         "резервный":   "#3498db",
         "неизвестный": "#bbb",
     }
-    if by_block and block_dates:
+
+    # Filter: metric_id=55558, lvl_4="Ошибка"
+    df_ss_err = df[
+        (df["metric_id"].astype(str) == "55558") &
+        (df["lvl_4"].astype(str) == "Ошибка")
+    ].copy() if "lvl_4" in df.columns else pd.DataFrame()
+
+    if not df_ss_err.empty:
+        df_ss_err["date"] = df_ss_err["report_dt"].dt.date.astype(str)
+        # Exclude Sundays
+        df_ss_err = df_ss_err[df_ss_err["report_dt"].dt.weekday != 6]
+        all_dates = sorted(df_ss_err["date"].unique())
+        by_block_err = {}
+        for bt, grp in df_ss_err.groupby("block_type"):
+            day_vals = grp.groupby("date")["val"].sum().to_dict()
+            by_block_err[bt] = day_vals
+
         fig = go.Figure()
         for bt in BLOCK_ORDER:
-            if bt not in by_block:
+            if bt not in by_block_err:
                 continue
-            y_vals = [by_block[bt].get(d, 0) for d in block_dates]
+            y_vals = [by_block_err[bt].get(d, 0) for d in all_dates]
             fig.add_trace(go.Bar(
-                x=block_dates,
-                y=y_vals,
-                name=bt,
+                x=all_dates, y=y_vals, name=bt,
                 marker_color=BLOCK_COLORS_TIMELINE.get(bt, "#aaa"),
             ))
         fig.update_layout(
             barmode="stack",
-            title="Динамика ошибок по дням (в разрезе блоков)",
+            title="Динамика ошибок статусного экрана по дням (в разрезе блоков, без воскресений)",
             height=380,
             legend=dict(orientation="h", y=-0.2),
             margin=dict(l=40, r=20, t=50, b=80),
-            plot_bgcolor="#fafafa",
-            paper_bgcolor="#ffffff",
-            xaxis_title="Дата",
-            yaxis_title="Кол-во событий (val)",
+            plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
+            xaxis_title="Дата", yaxis_title="Кол-во ошибок (val)",
         )
         charts["timeline"] = fig.to_html(full_html=False, include_plotlyjs=False)
     else:
-        # fallback: by metric_name
-        trends = results.get("trends", {})
-        ts_by_metric = trends.get("timeseries", {})
-        if ts_by_metric:
+        # fallback: all errors by block_type
+        ch_data = results.get("channel_breakdown", {})
+        by_block = ch_data.get("by_block_per_day", {})
+        block_dates = ch_data.get("dates", [])
+        if by_block and block_dates:
             fig = go.Figure()
-            for i, (metric, records) in enumerate(ts_by_metric.items()):
-                ts_df = pd.DataFrame(records)
+            for bt in BLOCK_ORDER:
+                if bt not in by_block:
+                    continue
+                y_vals = [by_block[bt].get(d, 0) for d in block_dates]
                 fig.add_trace(go.Bar(
-                    x=ts_df["date"].astype(str), y=ts_df["val"],
-                    name=metric, marker_color=COLORS[i % len(COLORS)],
+                    x=block_dates, y=y_vals, name=bt,
+                    marker_color=BLOCK_COLORS_TIMELINE.get(bt, "#aaa"),
                 ))
             fig.update_layout(
-                barmode="stack", title="Динамика ошибок по дням", height=380,
-                legend=dict(orientation="h", y=-0.2),
+                barmode="stack", title="Динамика ошибок по дням (в разрезе блоков)",
+                height=380, legend=dict(orientation="h", y=-0.2),
                 margin=dict(l=40, r=20, t=50, b=80),
                 plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
                 xaxis_title="Дата", yaxis_title="Кол-во событий (val)",
