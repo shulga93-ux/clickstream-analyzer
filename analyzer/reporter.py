@@ -631,21 +631,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <!-- WoW & DoD side by side -->
   <div class="two-col">
 
-    {# Macro: deviation table with inline bar; col_prev/col_curr — column header labels #}
-    {% macro dev_table(rows, meta, col_prev="Было", col_curr="Стало") %}
+    {# Macro: deviation table with inline bar.
+       sortable=True добавляет сортировку по клику на заголовки.
+       default_sort_col — индекс колонки для дефолтной сортировки (0-based).
+       default_sort_dir — "asc" или "desc". #}
+    {% macro dev_table(rows, meta, col_prev="Было", col_curr="Стало", sortable=False, table_id="dev_tbl", default_sort_col=3, default_sort_dir="desc") %}
     {% if rows %}
     {% set max_delta = namespace(v=1) %}
     {% for r in rows %}{% if r.delta | abs > max_delta.v %}{% set max_delta.v = r.delta | abs %}{% endif %}{% endfor %}
     <div style="overflow-x:auto;">
-    <table class="stat-table dev-tbl">
+    <table class="stat-table dev-tbl" {% if sortable %}id="{{ table_id }}"{% endif %}>
       <thead>
         <tr>
+          {% if sortable %}
+          <th style="width:36%;cursor:pointer;user-select:none;white-space:nowrap;" data-col="0">Продукт <span class="si">⇅</span></th>
+          <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
+          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">{{ col_prev }} <span class="si">⇅</span></th>
+          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">{{ col_curr }} <span class="si">⇅</span></th>
+          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Δval <span class="si">⇅</span></th>
+          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">% <span class="si">⇅</span></th>
+          {% else %}
           <th style="width:36%">Продукт</th>
           <th>Сегмент</th>
           <th style="text-align:right">{{ col_prev }}</th>
           <th style="text-align:right">{{ col_curr }}</th>
           <th style="text-align:right">Δval</th>
           <th style="text-align:right">%</th>
+          {% endif %}
           <th style="width:80px"></th>
         </tr>
       </thead>
@@ -654,14 +666,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       {% set is_up = r.delta > 0 %}
       {% set bar_w = ((r.delta | abs) / max_delta.v * 76) | int %}
       <tr>
-        <td><strong>{{ r.lvl_2 }}</strong></td>
-        <td style="color:#666;font-size:0.82rem;">{{ r.segment }}</td>
-        <td style="text-align:right;color:#888;">{{ "{:,}".format(r.val_prev) }}</td>
-        <td style="text-align:right;">{{ "{:,}".format(r.val_curr) }}</td>
-        <td style="text-align:right;font-weight:700;color:{{ '#e74c3c' if is_up else '#3498db' }};">
+        <td data-val="{{ r.lvl_2 }}"><strong>{{ r.lvl_2 }}</strong></td>
+        <td data-val="{{ r.segment }}" style="color:#666;font-size:0.82rem;">{{ r.segment }}</td>
+        <td data-val="{{ r.val_prev }}" style="text-align:right;color:#888;">{{ "{:,}".format(r.val_prev) }}</td>
+        <td data-val="{{ r.val_curr }}" style="text-align:right;">{{ "{:,}".format(r.val_curr) }}</td>
+        <td data-val="{{ r.delta }}" style="text-align:right;font-weight:700;color:{{ '#e74c3c' if is_up else '#3498db' }};">
           {{ '+' if is_up else '' }}{{ "{:,}".format(r.delta) }}
         </td>
-        <td style="text-align:right;font-weight:600;color:{{ '#e74c3c' if is_up else '#3498db' }};">
+        <td data-val="{{ r.pct }}" style="text-align:right;font-weight:600;color:{{ '#e74c3c' if is_up else '#3498db' }};">
           {{ '+' if is_up else '' }}{{ r.pct }}%
         </td>
         <td>
@@ -672,6 +684,52 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       </tbody>
     </table>
     </div>
+    {% if sortable %}
+    <script>
+    (function() {
+      var TID = "{{ table_id }}";
+      var sortState = { col: null, dir: null };
+
+      function updateIcons(tbl, activeCol, dir) {
+        tbl.querySelectorAll("thead th[data-col] .si").forEach(function(span) {
+          var col = parseInt(span.parentNode.getAttribute("data-col"));
+          span.textContent = col === activeCol ? (dir === "desc" ? " ▼" : " ▲") : " ⇅";
+          span.style.color = col === activeCol ? "#4f8ef7" : "#bbb";
+        });
+      }
+
+      function sortTable(tbl, col, dir) {
+        var tbody = tbl.querySelector("tbody");
+        var rows = Array.from(tbody.querySelectorAll("tr"));
+        rows.sort(function(a, b) {
+          var av = a.cells[col] ? (a.cells[col].getAttribute("data-val") || "") : "";
+          var bv = b.cells[col] ? (b.cells[col].getAttribute("data-val") || "") : "";
+          var an = parseFloat(av), bn = parseFloat(bv);
+          var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru");
+          return dir === "desc" ? -cmp : cmp;
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
+        sortState.col = col;
+        sortState.dir = dir;
+        updateIcons(tbl, col, dir);
+      }
+
+      document.addEventListener("DOMContentLoaded", function() {
+        var tbl = document.getElementById(TID);
+        if (!tbl) return;
+        tbl.querySelectorAll("thead th[data-col]").forEach(function(th) {
+          th.style.cursor = "pointer";
+          th.addEventListener("click", function() {
+            var col = parseInt(th.getAttribute("data-col"));
+            var dir = (sortState.col === col && sortState.dir === "asc") ? "desc" : "asc";
+            sortTable(tbl, col, dir);
+          });
+        });
+        sortTable(tbl, {{ default_sort_col }}, "{{ default_sort_dir }}");
+      });
+    })();
+    </script>
+    {% endif %}
     {% else %}
     <div class="empty-state">✅ Отклонений нет</div>
     {% endif %}
@@ -687,7 +745,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </span>{% endif %}
       </h2>
       {% if wow_grouped %}
-        {{ dev_table(wow_grouped, wow_meta, col_prev="Пред. неделя (Σ ошибок)", col_curr="Тек. неделя (Σ ошибок)") }}
+        {{ dev_table(wow_grouped, wow_meta, col_prev="Пред. неделя (Σ ошибок)", col_curr="Тек. неделя (Σ ошибок)", sortable=True, table_id="wow_dev_tbl", default_sort_col=3, default_sort_dir="desc") }}
       {% else %}
         <div class="empty-state">✅ WoW отклонений нет (нет данных за предыдущие 7 дней или ниже порога)</div>
       {% endif %}
