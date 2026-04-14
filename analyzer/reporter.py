@@ -113,7 +113,12 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
     # Store in charts dict as JSON-serialisable data (rendered via template table)
     charts["wow_grouped"] = wow_grouped[:50]
     charts["dod_grouped"] = dod_grouped[:50]
-    charts["wow_meta"] = {"date_from": wow[0]["date_from"], "date_to": wow[0]["date_to"]} if wow else {}
+    charts["wow_meta"] = {
+        "curr_week_start": wow[0].get("curr_week_start", wow[0]["date_from"]),
+        "curr_week_end":   wow[0].get("curr_week_end",   wow[0]["date_to"]),
+        "prev_week_start": wow[0].get("prev_week_start", wow[0]["date_from"]),
+        "prev_week_end":   wow[0].get("prev_week_end",   wow[0]["date_to"]),
+    } if wow else {}
     charts["dod_meta"] = {"date_from": dod[0]["date_from"], "date_to": dod[0]["date_to"]} if dod else {}
 
     # 4. Top-20 services horizontal bar
@@ -434,7 +439,7 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
               <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;font-weight:700;color:${{dodColor}};">
                 ${{pm.dod_delta != null ? (pm.dod_delta > 0 ? "+" : "") + fmtNum(pm.dod_delta) + " (" + fmtPct(pm.dod_pct) + ")" : "—"}}
               </td></tr>
-          <tr><td style="padding:7px 10px;">WoW ${{D.groupLabel}} (${{pm.last_date}} vs -7д)</td>
+          <tr><td style="padding:7px 10px;">WoW ${{D.groupLabel}} — неделя к неделе</td>
               <td style="padding:7px 10px;text-align:right;font-weight:700;color:${{wowColor}};">
                 ${{pm.wow_delta != null ? (pm.wow_delta > 0 ? "+" : "") + fmtNum(pm.wow_delta) + " (" + fmtPct(pm.wow_pct) + ")" : "—"}}
               </td></tr>
@@ -626,8 +631,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <!-- WoW & DoD side by side -->
   <div class="two-col">
 
-    {# Macro: deviation table with inline bar #}
-    {% macro dev_table(rows, meta) %}
+    {# Macro: deviation table with inline bar; col_prev/col_curr — column header labels #}
+    {% macro dev_table(rows, meta, col_prev="Было", col_curr="Стало") %}
     {% if rows %}
     {% set max_delta = namespace(v=1) %}
     {% for r in rows %}{% if r.delta | abs > max_delta.v %}{% set max_delta.v = r.delta | abs %}{% endif %}{% endfor %}
@@ -637,8 +642,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <tr>
           <th style="width:36%">Продукт</th>
           <th>Сегмент</th>
-          <th style="text-align:right">Было</th>
-          <th style="text-align:right">Стало</th>
+          <th style="text-align:right">{{ col_prev }}</th>
+          <th style="text-align:right">{{ col_curr }}</th>
           <th style="text-align:right">Δval</th>
           <th style="text-align:right">%</th>
           <th style="width:80px"></th>
@@ -674,13 +679,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     <!-- WoW -->
     <div class="section">
-      <h2>📅 WoW отклонения — {{ wow_grouped | length }} продуктов
-        {% if wow_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">{{ wow_meta.date_from }} vs {{ wow_meta.date_to }}</span>{% endif %}
+      <h2>📅 WoW отклонения — неделя к неделе — {{ wow_grouped | length }} продуктов
+        {% if wow_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">
+          Тек.: {{ wow_meta.curr_week_start }}–{{ wow_meta.curr_week_end }}
+          &nbsp;vs&nbsp;
+          Пред.: {{ wow_meta.prev_week_start }}–{{ wow_meta.prev_week_end }}
+        </span>{% endif %}
       </h2>
       {% if wow_grouped %}
-        {{ dev_table(wow_grouped, wow_meta) }}
+        {{ dev_table(wow_grouped, wow_meta, col_prev="Пред. неделя (Σ ошибок)", col_curr="Тек. неделя (Σ ошибок)") }}
       {% else %}
-        <div class="empty-state">✅ WoW отклонений нет (нет данных за -7 дней или ниже порога)</div>
+        <div class="empty-state">✅ WoW отклонений нет (нет данных за предыдущие 7 дней или ниже порога)</div>
       {% endif %}
     </div>
 
@@ -715,7 +724,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <th>Тип ошибки</th>
             <th>Σ val</th>
             <th>DoD ({{ pd_data.last_date }})</th>
-            <th>WoW ({{ pd_data.last_date }})</th>
+            <th>WoW (неделя к неделе)</th>
           </tr>
         </thead>
         <tbody>

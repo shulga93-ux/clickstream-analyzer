@@ -225,33 +225,37 @@ def detect_dod(df: pd.DataFrame) -> list:
     return result
 
 
-# ─── 4. WoW: last date vs D-7 ────────────────────────────────────────────────
+# ─── 4. WoW: last 7 days vs previous 7 days (full week vs full week) ──────────
 
 def detect_wow(df: pd.DataFrame) -> list:
-    """Compare last date vs D-7 (same weekday last week).
+    """Compare last full 7 days vs previous full 7 days.
     Threshold: |pct| > 30 and |delta| > 5, sorted by |delta| desc.
     """
     import datetime as _dt
 
     df2 = df.copy()
     df2["date"] = df2["report_dt"].dt.date
-    dates_set = set(df2["date"].unique())
-    dates = sorted(dates_set)
+    dates = sorted(df2["date"].unique())
 
     if not dates:
         return []
 
-    d_curr = dates[-1]
-    d_prev = d_curr - _dt.timedelta(days=7)
+    d_curr_end = dates[-1]
+    d_curr_start = d_curr_end - _dt.timedelta(days=6)   # текущая неделя: 7 дней
+    d_prev_end   = d_curr_end - _dt.timedelta(days=7)   # предыдущая неделя: 7 дней
+    d_prev_start = d_curr_end - _dt.timedelta(days=13)
 
-    if d_prev not in dates_set:
+    curr_week = df2[(df2["date"] >= d_curr_start) & (df2["date"] <= d_curr_end)]
+    prev_week = df2[(df2["date"] >= d_prev_start) & (df2["date"] <= d_prev_end)]
+
+    if curr_week.empty or prev_week.empty:
         return []
 
     available_cols = [c for c in _GROUP_COLS if c in df2.columns]
     grp_cols = available_cols
 
-    curr = df2[df2["date"] == d_curr].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_curr"})
-    prev = df2[df2["date"] == d_prev].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_prev"})
+    curr = curr_week.groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_curr"})
+    prev = prev_week.groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_prev"})
 
     merged = curr.merge(prev, on=grp_cols, how="outer").fillna(0)
     merged["val_curr"] = merged["val_curr"].astype(int)
@@ -267,8 +271,12 @@ def detect_wow(df: pd.DataFrame) -> list:
     result = []
     for _, row in flagged.iterrows():
         r = {
-            "date_from": str(d_prev),
-            "date_to": str(d_curr),
+            "date_from": str(d_prev_start),
+            "date_to": str(d_curr_end),
+            "curr_week_start": str(d_curr_start),
+            "curr_week_end": str(d_curr_end),
+            "prev_week_start": str(d_prev_start),
+            "prev_week_end": str(d_prev_end),
             "direction": "spike" if row["delta"] > 0 else "drop",
             "delta": int(row["delta"]),
             "pct": float(row["pct"]),
@@ -496,14 +504,15 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
                 dod_delta[p] = curr - prev
 
     if last_date:
-        wow_date = str(_dt.date.fromisoformat(last_date) - _dt.timedelta(days=7))
-        if wow_date in dates:
-            for p in product_names:
-                curr = matrix[p].get(last_date, 0)
-                prev = matrix[p].get(wow_date, 0)
-                if prev > 0:
-                    wow_pct[p] = round((curr - prev) / prev * 100, 1)
-                    wow_delta[p] = curr - prev
+        d_end = _dt.date.fromisoformat(last_date)
+        curr_week_dates = [str(d_end - _dt.timedelta(days=i)) for i in range(7)]
+        prev_week_dates = [str(d_end - _dt.timedelta(days=7 + i)) for i in range(7)]
+        for p in product_names:
+            curr_sum = sum(matrix[p].get(d, 0) for d in curr_week_dates)
+            prev_sum = sum(matrix[p].get(d, 0) for d in prev_week_dates)
+            if prev_sum > 0:
+                wow_pct[p] = round((curr_sum - prev_sum) / prev_sum * 100, 1)
+                wow_delta[p] = curr_sum - prev_sum
 
     products_meta = []
     for _, row in top_products.iterrows():
