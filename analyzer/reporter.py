@@ -111,7 +111,7 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
     dod_grouped = _group_by_product(dod) if dod else []
 
     # Store in charts dict as JSON-serialisable data (rendered via template table)
-    charts["wow_grouped"] = wow_grouped[:50]
+    charts["wow_grouped"] = wow_grouped[:20]
     charts["dod_grouped"] = dod_grouped[:50]
     charts["wow_meta"] = {
         "curr_week_start": wow[0].get("curr_week_start", wow[0]["date_from"]),
@@ -737,7 +737,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     <!-- WoW -->
     <div class="section">
-      <h2>📅 WoW отклонения — неделя к неделе — {{ wow_grouped | length }} продуктов
+      <h2>📅 Топ-20 продуктов с WoW отклонениями — неделя к неделе
         {% if wow_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">
           Тек.: {{ wow_meta.curr_week_start }}–{{ wow_meta.curr_week_end }}
           &nbsp;vs&nbsp;
