@@ -555,6 +555,22 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
             pct_chg = 0.0
         product_trends[p] = {"direction": direction, "pct_change": pct_chg}
 
+    # helper: compute trend from a list of daily values
+    def _trend_from_vals(vals):
+        n = len(vals)
+        if n >= 2:
+            half = min(7, n // 2) if n >= 4 else 1
+            curr_avg = np.mean(vals[-half:]) if half > 0 else 0
+            prev_avg = np.mean(vals[:half])  if half > 0 else 0
+            if prev_avg > 0:
+                pct = round((curr_avg - prev_avg) / prev_avg * 100, 1)
+            else:
+                pct = 0.0
+            if abs(pct) < 15:
+                return "stable", pct
+            return ("growing" if pct > 0 else "declining"), pct
+        return "stable", 0.0
+
     products_meta = []
     for _, row in top_products.iterrows():
         p = str(row["lvl_2"])
@@ -573,9 +589,34 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
             "trend_pct": tr.get("pct_change", 0.0),
         })
 
+    # ── Per-channel product tables (Web АРМ / iPad Планшеты) ─────────────────
+    CHANNELS = ["Web (АРМ)", "iPad (Планшеты)"]
+    segment_map = {str(row["lvl_2"]): str(row["segment_name"]) for _, row in top_products.iterrows()}
+
+    by_channel_products = {}
+    for ch in CHANNELS:
+        ch_rows = []
+        for p in product_names:
+            ch_day_vals = channel_matrix.get(p, {}).get(ch, {})
+            total = sum(ch_day_vals.values())
+            if total == 0:
+                continue
+            vals = [ch_day_vals.get(d, 0) for d in dates_str]
+            direction, pct_chg = _trend_from_vals(vals)
+            ch_rows.append({
+                "name": p,
+                "total_val": total,
+                "segment": segment_map.get(p, ""),
+                "trend_direction": direction,
+                "trend_pct": pct_chg,
+            })
+        ch_rows.sort(key=lambda x: x["total_val"], reverse=True)
+        by_channel_products[ch] = ch_rows[:20]
+
     return {
         "dates": dates,
         "products": products_meta,
+        "by_channel_products": by_channel_products,
         "matrix": matrix,
         "block_matrix": block_matrix,
         "lvl4_matrix": lvl4_matrix,
