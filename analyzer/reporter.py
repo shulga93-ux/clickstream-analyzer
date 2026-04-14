@@ -836,6 +836,79 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       Выберите продукт из списка — увидите динамику ошибок по блокам (боевой / пилотный / резервный) и каналам.
     </p>
     {{ charts.product_drill }}
+    {% if pd_data.products %}
+    <h3 style="font-size:0.95rem;font-weight:600;margin:20px 0 10px;color:#444;">📊 Все каналы</h3>
+    <div style="overflow-x:auto;">
+    <table class="stat-table" id="pd_all_tbl" style="width:100%;">
+      <thead>
+        <tr>
+          <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="0">Продукт <span class="si">⇅</span></th>
+          <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
+          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Σ val <span class="si">⇅</span></th>
+          <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Тренд ошибок <span class="si">⇅</span></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for p in pd_data.products %}
+      {% set td = p.trend_direction if p.trend_direction is defined else 'stable' %}
+      {% set tp = p.trend_pct if p.trend_pct is defined else 0 %}
+      {% set trend_icon  = '📈' if td == 'growing' else ('📉' if td == 'declining' else '→') %}
+      {% set trend_color = '#e74c3c' if td == 'growing' else ('#27ae60' if td == 'declining' else '#888') %}
+      {% set trend_label = 'Растёт' if td == 'growing' else ('Падает' if td == 'declining' else 'Стабильно') %}
+      <tr>
+        <td data-val="{{ p.name }}" style="font-size:0.83rem;"><strong>{{ p.name }}</strong></td>
+        <td data-val="{{ p.segment }}" style="color:#666;font-size:0.8rem;">{{ p.segment }}</td>
+        <td data-val="{{ p.total_val }}" style="text-align:right;">{{ "{:,}".format(p.total_val) }}</td>
+        <td data-val="{{ tp }}" style="text-align:center;">
+          <span style="color:{{ trend_color }};font-weight:600;white-space:nowrap;font-size:0.85rem;">
+            {{ trend_icon }} {{ trend_label }}
+            {% if td != 'stable' and tp != 0 %}<span style="font-size:0.78rem;margin-left:3px;">({{ '+' if tp > 0 else '' }}{{ tp }}%)</span>{% endif %}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <script>
+    (function() {
+      var TID = "pd_all_tbl";
+      var ss = { col: null, dir: null };
+      function upd(tbl, col, dir) {
+        tbl.querySelectorAll("thead th[data-col] .si").forEach(function(s) {
+          var c = parseInt(s.parentNode.getAttribute("data-col"));
+          s.textContent = c === col ? (dir === "desc" ? " ▼" : " ▲") : " ⇅";
+          s.style.color  = c === col ? "#4f8ef7" : "#bbb";
+        });
+      }
+      function srt(tbl, col, dir) {
+        var tbody = tbl.querySelector("tbody");
+        var rows = Array.from(tbody.querySelectorAll("tr"));
+        rows.sort(function(a, b) {
+          var av = a.cells[col] ? (a.cells[col].getAttribute("data-val") || "") : "";
+          var bv = b.cells[col] ? (b.cells[col].getAttribute("data-val") || "") : "";
+          var an = parseFloat(av), bn = parseFloat(bv);
+          var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru");
+          return dir === "desc" ? -cmp : cmp;
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
+        ss.col = col; ss.dir = dir; upd(tbl, col, dir);
+      }
+      document.addEventListener("DOMContentLoaded", function() {
+        var tbl = document.getElementById(TID);
+        if (!tbl) return;
+        tbl.querySelectorAll("thead th[data-col]").forEach(function(th) {
+          th.addEventListener("click", function() {
+            var col = parseInt(th.getAttribute("data-col"));
+            srt(tbl, col, (ss.col === col && ss.dir === "asc") ? "desc" : "asc");
+          });
+        });
+        srt(tbl, 2, "desc");
+      });
+    })();
+    </script>
+    {% endif %}
+
     {% set ch_data = pd_data.by_channel_products if pd_data.by_channel_products is defined else {} %}
     {% if ch_data %}
     {# Macro: channel product table #}
@@ -913,13 +986,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endif %}
     {% endmacro %}
 
-    <div class="two-col" style="margin-top:16px;">
+    <h3 style="font-size:0.95rem;font-weight:600;margin:20px 0 10px;color:#444;">По каналам</h3>
+    <div class="two-col" style="margin-top:0;">
       <div>
-        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;color:#444;">🖥️ Web (АРМ)</h3>
+        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:8px;color:#555;">🖥️ Web (АРМ)</h3>
         {{ ch_table(ch_data.get('Web (АРМ)', []), 'pd_web_tbl') }}
       </div>
       <div>
-        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;color:#444;">📱 iPad (Планшеты)</h3>
+        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:8px;color:#555;">📱 iPad (Планшеты)</h3>
         {{ ch_table(ch_data.get('iPad (Планшеты)', []), 'pd_ipad_tbl') }}
       </div>
     </div>
