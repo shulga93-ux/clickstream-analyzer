@@ -435,12 +435,6 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
               <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;">${{pm.segment}}</td></tr>
           <tr><td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;">Суммарный val (период)</td>
               <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;font-weight:700;">${{fmtNum(pm.total_val)}}</td></tr>
-          <tr><td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;">Последний день (${{pm.last_date}})</td>
-              <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;">${{fmtNum(pm.last_val)}}</td></tr>
-          <tr><td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;">DoD ${{D.groupLabel}} (${{pm.last_date}})</td>
-              <td style="padding:7px 10px;border-bottom:1px solid #f0f2f5;text-align:right;font-weight:700;color:${{dodColor}};">
-                ${{pm.dod_delta != null ? (pm.dod_delta > 0 ? "+" : "") + fmtNum(pm.dod_delta) + " (" + fmtPct(pm.dod_pct) + ")" : "—"}}
-              </td></tr>
           <tr><td style="padding:7px 10px;">WoW ${{D.groupLabel}} — неделя к неделе</td>
               <td style="padding:7px 10px;text-align:right;font-weight:700;color:${{wowColor}};">
                 ${{pm.wow_delta != null ? (pm.wow_delta > 0 ? "+" : "") + fmtNum(pm.wow_delta) + " (" + fmtPct(pm.wow_pct) + ")" : "—"}}
