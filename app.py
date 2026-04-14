@@ -129,9 +129,23 @@ def upload():
             if metric_id == "55558":
                 from analyzer.detector import detect_product_dynamics
                 df_error = df_m[df_m["lvl_4"] == "Ошибка"].copy()
+                df_success = df_m[df_m["lvl_4"] == "Успех"].copy()
                 pd_error = detect_product_dynamics(df_error)   # stats on Ошибка only
-                pd_full  = detect_product_dynamics(df_m)       # lvl4_matrix for chart
-                pd_error["lvl4_matrix"] = pd_full["lvl4_matrix"]   # inject full lvl4 breakdown
+                # Build success matrix for ratio line: use same product list as pd_error
+                error_products = [pm["name"] for pm in pd_error.get("products", [])]
+                pd_error["success_matrix"] = {}
+                if not df_success.empty and error_products:
+                    import pandas as _pd2
+                    df_s2 = df_success[df_success["lvl_2"].isin(error_products)].copy()
+                    df_s2["date"] = df_s2["report_dt"].dt.date.astype(str)
+                    suc_grp = df_s2.groupby(["lvl_2", "date"])["val"].sum()
+                    for (prod, date), val in suc_grp.items():
+                        if prod not in pd_error["success_matrix"]:
+                            pd_error["success_matrix"][prod] = {}
+                        pd_error["success_matrix"][prod][date] = int(val)
+                # lvl4_matrix still needed for use_lvl4 detection; build with large top_n
+                pd_full = detect_product_dynamics(df_m, top_n=200)
+                pd_error["lvl4_matrix"] = pd_full["lvl4_matrix"]
                 results["product_dynamics"] = pd_error
 
             slug = str(metric_id)

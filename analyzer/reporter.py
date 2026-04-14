@@ -472,7 +472,11 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
 
             # Primary breakdown traces (block_type or lvl_4)
             for key in primary_keys:
-                kdata = primary_matrix.get(p, {}).get(key, {})
+                # For lvl4 mode use pre-filtered matrix (ensures all products have data)
+                if use_lvl4 and key == "Ошибка":
+                    kdata = pd_data.get("matrix", {}).get(p, {})
+                else:
+                    kdata = primary_matrix.get(p, {}).get(key, {})
                 y_vals = [kdata.get(d, 0) for d in dates_pd]
                 if sum(y_vals) == 0:
                     continue
@@ -486,8 +490,8 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
 
             # Ошибка/Успех ratio line (only for lvl4 mode)
             if use_lvl4:
-                err_data = primary_matrix.get(p, {}).get("Ошибка", {})
-                suc_data = lvl4_matrix.get(p, {}).get("Успех", {})
+                err_data = pd_data.get("matrix", {}).get(p, {})
+                suc_data = pd_data.get("success_matrix", {}).get(p, {})
                 ratio_vals = []
                 for d in dates_pd:
                     e = err_data.get(d, 0)
