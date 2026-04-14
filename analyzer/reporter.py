@@ -1519,3 +1519,170 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </body>
 </html>
 """
+
+
+# ─── СВОД Report ─────────────────────────────────────────────────────────────
+
+def generate_svod_report(all_results: list, output_path: str) -> int:
+    """Generate consolidated СВОД report with products having growing trends across all metrics."""
+    from datetime import datetime as _dt_now
+    from pathlib import Path as _Path
+    import json as _json
+
+    rows = []
+    for metric_id, label, results in all_results:
+        pd_data = results.get("product_dynamics", {})
+        products = pd_data.get("products", [])
+        is_ss = (metric_id == "55558")
+        for pm in products:
+            criteria = []
+            trend_dir = pm.get("trend_direction", "stable")
+            trend_pct = pm.get("trend_pct")
+            if trend_dir == "growing":
+                pct_str = f"+{trend_pct}%" if trend_pct is not None else ""
+                criteria.append(f"📈 Рост ошибок {pct_str}".strip())
+            if is_ss:
+                et_dir = pm.get("err_suc_trend_dir", "stable")
+                et_pct = pm.get("err_suc_trend_pct")
+                if et_dir == "growing":
+                    pct_str = f"+{et_pct}%" if et_pct is not None else ""
+                    criteria.append(f"📈 Рост доли ошибок {pct_str}".strip())
+            if criteria:
+                rows.append({
+                    "name": pm["name"],
+                    "segment": pm.get("segment", ""),
+                    "metric_label": label,
+                    "metric_id": metric_id,
+                    "total_val": pm.get("total_val", 0),
+                    "trend_pct": trend_pct,
+                    "err_suc_ratio": pm.get("err_suc_ratio"),
+                    "err_suc_trend_pct": pm.get("err_suc_trend_pct"),
+                    "criteria": " &amp; ".join(criteria),
+                })
+
+    # Sort: by metric_id then total_val desc
+    rows.sort(key=lambda r: (r["metric_id"], -r["total_val"]))
+
+    generated_at = _dt_now.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def fmt(n):
+        if n is None: return "—"
+        return f"{n:,}".replace(",", "\u00a0")
+
+    def pct_cell(v, color_up="#e74c3c", color_dn="#27ae60"):
+        if v is None: return "—"
+        color = color_up if v > 0 else color_dn
+        sign = "+" if v > 0 else ""
+        return f'<span style="color:{color};font-weight:600;">{sign}{v}%</span>'
+
+    tbody = ""
+    for r in rows:
+        metric_badge_color = {"55556": "#e67e22", "55557": "#9b59b6", "55558": "#2980b9"}.get(r["metric_id"], "#888")
+        ratio_cell = f'{r["err_suc_ratio"]}%' if r.get("err_suc_ratio") is not None else "—"
+        tbody += f"""
+      <tr>
+        <td style="font-size:0.83rem;"><strong>{r['name']}</strong></td>
+        <td style="color:#666;font-size:0.8rem;">{r['segment']}</td>
+        <td><span style="background:{metric_badge_color};color:#fff;padding:2px 8px;border-radius:10px;font-size:0.78rem;white-space:nowrap;">{r['metric_label']}</span></td>
+        <td style="text-align:right;">{fmt(r['total_val'])}</td>
+        <td style="text-align:center;">{pct_cell(r['trend_pct'])}</td>
+        <td style="text-align:right;">{ratio_cell}</td>
+        <td style="text-align:center;">{pct_cell(r['err_suc_trend_pct'])}</td>
+        <td style="font-size:0.82rem;">{r['criteria']}</td>
+      </tr>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>СВОД — продукты с отклонениями</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f4f6f9; color: #333; padding: 24px; }}
+    .card {{ background: #fff; border-radius: 12px; padding: 28px 32px; margin-bottom: 24px;
+              box-shadow: 0 2px 12px rgba(0,0,0,0.07); }}
+    h1 {{ font-size: 1.4rem; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; }}
+    .meta {{ font-size: 0.82rem; color: #999; margin-bottom: 20px; }}
+    .stat-table {{ width: 100%; border-collapse: collapse; font-size: 0.88rem; }}
+    .stat-table th {{ background: #f8f9fa; padding: 10px 12px; text-align: left;
+                      font-weight: 600; color: #555; border-bottom: 2px solid #e9ecef;
+                      cursor: pointer; user-select: none; white-space: nowrap; }}
+    .stat-table th:hover {{ background: #eef0f3; }}
+    .stat-table td {{ padding: 9px 12px; border-bottom: 1px solid #f0f2f5; vertical-align: middle; }}
+    .stat-table tbody tr:hover {{ background: #fafbff; }}
+    .si {{ color: #bbb; font-size: 0.8em; margin-left: 3px; }}
+    .empty {{ text-align: center; color: #aaa; padding: 40px; font-size: 0.95rem; }}
+    a.back {{ display: inline-block; margin-bottom: 20px; color: #4f8ef7;
+               text-decoration: none; font-size: 0.88rem; }}
+    a.back:hover {{ text-decoration: underline; }}
+    .badge-count {{ display: inline-block; background: #e74c3c; color: #fff;
+                    border-radius: 20px; padding: 2px 10px; font-size: 0.8rem;
+                    font-weight: 700; margin-left: 10px; vertical-align: middle; }}
+  </style>
+</head>
+<body>
+  <a class="back" href="/">← На главную</a>
+  <div class="card">
+    <h1>📋 СВОД — продукты с отклонениями <span class="badge-count">{len(rows)}</span></h1>
+    <div class="meta">Сформировано: {generated_at} &nbsp;·&nbsp;
+      Критерии: восходящий тренд по кол-ву ошибок или по доле ошибок (для Статусного экрана)</div>
+    {'<div class="empty">✅ Продуктов с отклонениями не обнаружено</div>' if not rows else f'''
+    <div style="overflow-x:auto;">
+    <table class="stat-table" id="svod_tbl">
+      <thead>
+        <tr>
+          <th data-col="0">Продукт <span class="si">⇅</span></th>
+          <th data-col="1">Сегмент <span class="si">⇅</span></th>
+          <th data-col="2">Отчёт <span class="si">⇅</span></th>
+          <th data-col="3" style="text-align:right;">Σ ошибок <span class="si">⇅</span></th>
+          <th data-col="4" style="text-align:center;">Тренд ошибок <span class="si">⇅</span></th>
+          <th data-col="5" style="text-align:right;">Доля ошибок % <span class="si">⇅</span></th>
+          <th data-col="6" style="text-align:center;">Тренд доли <span class="si">⇅</span></th>
+          <th data-col="7">Критерий <span class="si">⇅</span></th>
+        </tr>
+      </thead>
+      <tbody>{tbody}
+      </tbody>
+    </table>
+    </div>
+    <script>
+    (function() {{
+      var ss = {{col:null,dir:null}};
+      var tbl = document.getElementById("svod_tbl");
+      function upd(col,dir) {{
+        tbl.querySelectorAll("thead th[data-col] .si").forEach(function(s) {{
+          var c = parseInt(s.parentNode.getAttribute("data-col"));
+          s.textContent = c===col?(dir==="desc"?" ▼":" ▲"):" ⇅";
+          s.style.color = c===col?"#4f8ef7":"#bbb";
+        }});
+      }}
+      function srt(col,dir) {{
+        var tbody = tbl.querySelector("tbody");
+        var rows = Array.from(tbody.querySelectorAll("tr"));
+        rows.sort(function(a,b) {{
+          var av=a.cells[col]?(a.cells[col].getAttribute("data-val")||a.cells[col].textContent.trim()):"";
+          var bv=b.cells[col]?(b.cells[col].getAttribute("data-val")||b.cells[col].textContent.trim()):"";
+          var an=parseFloat(av),bn=parseFloat(bv);
+          var cmp=(!isNaN(an)&&!isNaN(bn))?an-bn:av.localeCompare(bv,"ru");
+          return dir==="desc"?-cmp:cmp;
+        }});
+        rows.forEach(function(r){{tbody.appendChild(r);}});
+        ss.col=col;ss.dir=dir;upd(col,dir);
+      }}
+      tbl.querySelectorAll("thead th[data-col]").forEach(function(th) {{
+        th.addEventListener("click",function() {{
+          var col=parseInt(th.getAttribute("data-col"));
+          srt(col,(ss.col===col&&ss.dir==="asc")?"desc":"asc");
+        }});
+      }});
+      srt(3,"desc");
+    }})();
+    </script>'''}
+  </div>
+</body>
+</html>"""
+
+    _Path(output_path).write_text(html, encoding="utf-8")
+    return len(rows)

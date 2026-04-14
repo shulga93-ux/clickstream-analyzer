@@ -106,6 +106,7 @@ def upload():
         total_anomalies = 0
         total_wow = 0
         total_dod = 0
+        all_results_for_svod = []
 
         # Generate one report per metric_id
         for metric_id, label in METRIC_LABELS.items():
@@ -200,6 +201,8 @@ def upload():
                 "wow_deviations": len(results.get("wow", [])),
                 "dod_deviations": len(results.get("dod", [])),
             })
+            # Collect for СВОД
+            all_results_for_svod.append((metric_id, label, results))
 
         if not reports:
             return jsonify({"error": "Нет данных ни по одной метрике"}), 422
@@ -215,6 +218,24 @@ def upload():
             "total_records": len(df_full),
             "total_val": int(df_full["val"].sum()),
             "unique_products": int(df_full["lvl_2"].nunique()),
+            "date_range": {},
+            "anomalies_found": 0,
+            "wow_deviations": 0,
+            "dod_deviations": 0,
+        })
+
+        # Generate СВОД report
+        from analyzer.reporter import generate_svod_report
+        svod_filename = f"report_{upload_id}_svod.html"
+        svod_path = REPORT_DIR / svod_filename
+        svod_count = generate_svod_report(all_results_for_svod, str(svod_path))
+        reports.insert(0, {
+            "metric_id": "svod",
+            "label": "📋 СВОД — продукты с отклонениями",
+            "report_url": f"/reports/{svod_filename}",
+            "total_records": svod_count,
+            "total_val": 0,
+            "unique_products": svod_count,
             "date_range": {},
             "anomalies_found": 0,
             "wow_deviations": 0,
