@@ -544,7 +544,7 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
                 pct_chg = round((curr_avg - prev_avg) / prev_avg * 100, 1)
             else:
                 pct_chg = 0.0
-            if abs(pct_chg) < 10:
+            if abs(pct_chg) < 15:
                 direction = "stable"
             elif pct_chg > 0:
                 direction = "growing"
