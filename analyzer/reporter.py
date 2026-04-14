@@ -1198,8 +1198,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
           <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Σ ошибок <span class="si">⇅</span></th>
           <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Тренд ошибок <span class="si">⇅</span></th>
+          {% if is_status_screen %}
           <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Доля ошибок % <span class="si">⇅</span></th>
           <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">Тренд доли <span class="si">⇅</span></th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -1209,12 +1211,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       {% set trend_icon  = '📈' if td == 'growing' else ('📉' if td == 'declining' else '→') %}
       {% set trend_color = '#e74c3c' if td == 'growing' else ('#27ae60' if td == 'declining' else '#888') %}
       {% set trend_label = 'Растёт' if td == 'growing' else ('Падает' if td == 'declining' else 'Стабильно') %}
+      {% if is_status_screen %}
       {% set er = p.err_suc_ratio if p.err_suc_ratio is defined else none %}
       {% set etd = p.err_suc_trend_dir if p.err_suc_trend_dir is defined else 'stable' %}
       {% set etp = p.err_suc_trend_pct if p.err_suc_trend_pct is defined else none %}
       {% set et_icon  = '📈' if etd == 'growing' else ('📉' if etd == 'declining' else '→') %}
       {% set et_color = '#e74c3c' if etd == 'growing' else ('#27ae60' if etd == 'declining' else '#888') %}
       {% set et_label = 'Растёт' if etd == 'growing' else ('Падает' if etd == 'declining' else 'Стаб.') %}
+      {% endif %}
       <tr>
         <td data-val="{{ p.name }}" style="font-size:0.83rem;"><strong>{{ p.name }}</strong></td>
         <td data-val="{{ p.segment }}" style="color:#666;font-size:0.8rem;">{{ p.segment }}</td>
@@ -1225,6 +1229,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {% if td != 'stable' and tp != 0 %}<span style="font-size:0.78rem;margin-left:3px;">({{ '+' if tp > 0 else '' }}{{ tp }}%)</span>{% endif %}
           </span>
         </td>
+        {% if is_status_screen %}
         <td data-val="{{ er if er is not none else -1 }}" style="text-align:right;font-weight:600;">
           {% if er is not none %}{{ er }}%{% else %}—{% endif %}
         </td>
@@ -1234,6 +1239,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {% if etd != 'stable' and etp is not none %}<span style="font-size:0.78rem;margin-left:3px;">({{ '+' if etp > 0 else '' }}{{ etp }}%)</span>{% endif %}
           </span>
         </td>
+        {% endif %}
       </tr>
       {% endfor %}
       </tbody>
@@ -1290,8 +1296,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
           <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Σ ошибок <span class="si">⇅</span></th>
           <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Тренд ошибок <span class="si">⇅</span></th>
+          {% if is_status_screen %}
           <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Доля ошибок % <span class="si">⇅</span></th>
           <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">Тренд доли <span class="si">⇅</span></th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -1301,6 +1309,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       {% set trend_icon  = '📈' if td == 'growing' else ('📉' if td == 'declining' else '→') %}
       {% set trend_color = '#e74c3c' if td == 'growing' else ('#27ae60' if td == 'declining' else '#888') %}
       {% set trend_label = 'Растёт' if td == 'growing' else ('Падает' if td == 'declining' else 'Стабильно') %}
+      {% if is_status_screen %}
       {% set _esl = pd_data.err_suc_lookup if pd_data.err_suc_lookup is defined else {} %}
       {% set _ese = _esl.get(p.name, {}) if _esl else {} %}
       {% set er = _ese.ratio if _ese.ratio is defined else none %}
@@ -1309,6 +1318,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       {% set et_icon  = '📈' if etd == 'growing' else ('📉' if etd == 'declining' else '→') %}
       {% set et_color = '#e74c3c' if etd == 'growing' else ('#27ae60' if etd == 'declining' else '#888') %}
       {% set et_label = 'Растёт' if etd == 'growing' else ('Падает' if etd == 'declining' else 'Стаб.') %}
+      {% endif %}
       <tr>
         <td data-val="{{ p.name }}" style="font-size:0.83rem;"><strong>{{ p.name }}</strong></td>
         <td data-val="{{ p.segment }}" style="color:#666;font-size:0.8rem;">{{ p.segment }}</td>
@@ -1319,6 +1329,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {% if td != 'stable' and tp != 0 %}<span style="font-size:0.78rem;margin-left:3px;">({{ '+' if tp > 0 else '' }}{{ tp }}%)</span>{% endif %}
           </span>
         </td>
+        {% if is_status_screen %}
         <td data-val="{{ er if er is not none else -1 }}" style="text-align:right;font-weight:600;">
           {% if er is not none %}{{ er }}%{% else %}—{% endif %}
         </td>
@@ -1328,6 +1339,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {% if etd != 'stable' and etp is not none %}<span style="font-size:0.78rem;margin-left:3px;">({{ '+' if etp > 0 else '' }}{{ etp }}%)</span>{% endif %}
           </span>
         </td>
+        {% endif %}
       </tr>
       {% endfor %}
       </tbody>
@@ -1375,6 +1387,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endmacro %}
 
     <h3 style="font-size:0.95rem;font-weight:600;margin:20px 0 10px;color:#444;">По каналам</h3>
+    {% if is_status_screen %}
     <div style="margin-top:0;">
       <div style="margin-bottom:24px;">
         <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:8px;color:#555;">🖥️ Web (АРМ)</h3>
@@ -1385,6 +1398,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {{ ch_table(ch_data.get('iPad (Планшеты)', []), 'pd_ipad_tbl') }}
       </div>
     </div>
+    {% else %}
+    <div class="two-col" style="margin-top:0;">
+      <div>
+        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:8px;color:#555;">🖥️ Web (АРМ)</h3>
+        {{ ch_table(ch_data.get('Web (АРМ)', []), 'pd_web_tbl') }}
+      </div>
+      <div>
+        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:8px;color:#555;">📱 iPad (Планшеты)</h3>
+        {{ ch_table(ch_data.get('iPad (Планшеты)', []), 'pd_ipad_tbl') }}
+      </div>
+    </div>
+    {% endif %}
     {% endif %}
   </div>
   {% endif %}
