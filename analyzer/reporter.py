@@ -1063,8 +1063,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
           <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Σ ошибок <span class="si">⇅</span></th>
           <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Тренд ошибок <span class="si">⇅</span></th>
-          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Ош/Усп % <span class="si">⇅</span></th>
-          <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">Тренд Ош/Усп <span class="si">⇅</span></th>
+          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Доля ошибок % <span class="si">⇅</span></th>
+          <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">Тренд доли <span class="si">⇅</span></th>
         </tr>
       </thead>
       <tbody>
@@ -1155,8 +1155,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
           <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Σ ошибок <span class="si">⇅</span></th>
           <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Тренд ошибок <span class="si">⇅</span></th>
-          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Ош/Усп % <span class="si">⇅</span></th>
-          <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">Тренд Ош/Усп <span class="si">⇅</span></th>
+          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Доля ошибок % <span class="si">⇅</span></th>
+          <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">Тренд доли <span class="si">⇅</span></th>
         </tr>
       </thead>
       <tbody>

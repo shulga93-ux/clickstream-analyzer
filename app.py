@@ -157,7 +157,7 @@ def upload():
                     # Overall ratio (%)
                     _te = sum(_em.values())
                     _ts = sum(_sm.values())
-                    _ratio = round(_te / _ts * 100, 1) if _ts > 0 else None
+                    _ratio = round(_te / (_te + _ts) * 100, 1) if (_te + _ts) > 0 else None
                     _pm["err_suc_ratio"] = _ratio
                     # Trend: compare last 7 non-Sunday days ratio vs prev 7
                     _dns = sorted([d for d in _em if _dta.date.fromisoformat(d).weekday() != 6])
@@ -167,8 +167,8 @@ def upload():
                         _cd = _dns[-_h:]; _pd_ = _dns[-2*_h:-_h]
                         _ce = sum(_em.get(d,0) for d in _cd); _cs = sum(_sm.get(d,0) for d in _cd)
                         _pe = sum(_em.get(d,0) for d in _pd_); _ps = sum(_sm.get(d,0) for d in _pd_)
-                        _cr = _ce / _cs * 100 if _cs > 0 else None
-                        _pr = _pe / _ps * 100 if _ps > 0 else None
+                        _cr = _ce / (_ce + _cs) * 100 if (_ce + _cs) > 0 else None
+                        _pr = _pe / (_pe + _ps) * 100 if (_pe + _ps) > 0 else None
                         if _cr is not None and _pr and _pr > 0:
                             _tpct = round((_cr - _pr) / _pr * 100, 1)
                             _tdir = "growing" if _tpct > 15 else ("declining" if _tpct < -15 else "stable")
