@@ -23,3 +23,6 @@ reports/
 # OS
 .DS_Store
 Thumbs.db
+
+# Auth config (contains password hash — do not commit)
+.env

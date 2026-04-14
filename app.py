@@ -1,7 +1,18 @@
 import os
 import uuid
 from pathlib import Path
-from flask import Flask, request, render_template, send_file, jsonify
+from functools import wraps
+from flask import Flask, request, render_template, send_file, jsonify, session, redirect, url_for
+from werkzeug.security import check_password_hash
+
+# Load .env if present
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 from analyzer.parser import parse_file, get_summary
 from analyzer.detector import detect_all
@@ -10,6 +21,19 @@ from analyzer.candidates import generate_candidates_report
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+
+AUTH_USER = os.environ.get("AUTH_USER", "admin")
+AUTH_PASSWORD_HASH = os.environ.get("AUTH_PASSWORD_HASH", "")
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.path))
+        return f(*args, **kwargs)
+    return decorated
 
 UPLOAD_DIR = Path("uploads")
 REPORT_DIR = Path("reports")
@@ -29,12 +53,36 @@ def allowed_file(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("logged_in"):
+        return redirect(url_for("index"))
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        if username == AUTH_USER and AUTH_PASSWORD_HASH and check_password_hash(AUTH_PASSWORD_HASH, password):
+            session["logged_in"] = True
+            next_url = request.args.get("next") or url_for("index")
+            return redirect(next_url)
+        error = "Неверный логин или пароль"
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
+@login_required
 def index():
     return render_template("index.html")
 
 
 @app.route("/upload", methods=["POST"])
+@login_required
 def upload():
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
@@ -159,6 +207,7 @@ def upload():
 
 
 @app.route("/reports/<filename>")
+@login_required
 def get_report(filename):
     report_path = REPORT_DIR / filename
     if not report_path.exists():
@@ -167,6 +216,7 @@ def get_report(filename):
 
 
 @app.route("/reports")
+@login_required
 def list_reports():
     reports = sorted(REPORT_DIR.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
     items = [{"name": p.name, "url": f"/reports/{p.name}"} for p in reports[:30]]
