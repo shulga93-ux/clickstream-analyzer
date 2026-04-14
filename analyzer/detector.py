@@ -66,6 +66,7 @@ def detect_all(df: pd.DataFrame) -> dict:
     results["channel_breakdown"] = detect_channel_breakdown(df)
     results["status_screen"] = detect_status_screen(df)
     results["product_dynamics"] = detect_product_dynamics(df)
+    results["weekly_trends"] = detect_weekly_trends(df)
     # backward-compat aliases
     results["deviations"] = results["dod"]
     return results
@@ -416,6 +417,37 @@ def detect_status_screen(df: pd.DataFrame) -> dict:
     }
 
 
+# ─── 8. Weekly trends by channel and block (excl. Sundays) ──────────────────
+
+def detect_weekly_trends(df: pd.DataFrame) -> dict:
+    """Aggregate errors by ISO week (Mon-Sat, excl. Sundays) per channel and block_type.
+    Returns weekly series suitable for trend line charts.
+    """
+    df2 = df.copy()
+    df2["date"] = df2["report_dt"].dt.date
+    # Exclude Sundays
+    df2 = df2[df2["date"].apply(lambda d: d.weekday() != 6)]
+    df2["week"] = df2["report_dt"].dt.strftime("%Y-W%V")  # ISO week label
+
+    weeks = sorted(df2["week"].unique())
+
+    # By channel
+    ch_week = df2.groupby(["week", "channel_name"])["val"].sum().reset_index()
+    by_channel = {}
+    for ch, grp in ch_week.groupby("channel_name"):
+        w_map = grp.set_index("week")["val"].to_dict()
+        by_channel[ch] = [{"week": w, "val": int(w_map.get(w, 0))} for w in weeks]
+
+    # By block_type
+    bl_week = df2.groupby(["week", "block_type"])["val"].sum().reset_index()
+    by_block = {}
+    for bt, grp in bl_week.groupby("block_type"):
+        w_map = grp.set_index("week")["val"].to_dict()
+        by_block[bt] = [{"week": w, "val": int(w_map.get(w, 0))} for w in weeks]
+
+    return {"weeks": weeks, "by_channel": by_channel, "by_block": by_block}
+
+
 # ─── Product dynamics (heatmap data) ─────────────────────────────────────────
 
 def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
@@ -532,8 +564,11 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
     # ── Per-product trend: current week avg vs previous week avg ─────────────
     dates_str = [str(d) for d in dates]
     product_trends = {}
+    # Exclude Sundays from trend calculation (they are near-zero and destroy regression)
+    dates_no_sun = [d for d in dates_str if _dt.date.fromisoformat(d).weekday() != 6]
+
     for p in product_names:
-        vals = [matrix[p].get(d, 0) for d in dates_str]
+        vals = [matrix[p].get(d, 0) for d in dates_no_sun]
         n = len(vals)
         if n >= 2:
             # Split into two halves (each up to 7 days), compare averages

@@ -227,6 +227,53 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
         )
         charts["trend_lines"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
+    # 8b. Weekly trends by channel and by block (excl. Sundays)
+    wt = results.get("weekly_trends", {})
+    weeks = wt.get("weeks", [])
+    CH_COLORS = {"Web (АРМ)": "#e67e22", "iPad (Планшеты)": "#9b59b6"}
+    BL_COLORS = {"боевой": "#e74c3c", "пилотный": "#27ae60", "резервный": "#3498db", "неизвестный": "#bbb"}
+
+    if weeks:
+        # Channel weekly trend
+        fig_ch = go.Figure()
+        for ch, series in wt.get("by_channel", {}).items():
+            ts = pd.DataFrame(series)
+            fig_ch.add_trace(go.Scatter(
+                x=ts["week"], y=ts["val"], name=ch, mode="lines+markers",
+                line=dict(color=CH_COLORS.get(ch, "#aaa"), width=2),
+                marker=dict(size=6),
+            ))
+        fig_ch.update_layout(
+            title="Тренд ошибок по каналам (по неделям, без воскресений)",
+            height=320, legend=dict(orientation="h", y=-0.2),
+            margin=dict(l=40, r=20, t=50, b=80),
+            plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
+            xaxis_title="Неделя", yaxis_title="Σ val",
+        )
+        charts["weekly_channel"] = fig_ch.to_html(full_html=False, include_plotlyjs=False)
+
+        # Block weekly trend
+        fig_bl = go.Figure()
+        BL_ORDER = ["боевой", "пилотный", "резервный", "неизвестный"]
+        for bt in BL_ORDER:
+            series = wt.get("by_block", {}).get(bt)
+            if not series:
+                continue
+            ts = pd.DataFrame(series)
+            fig_bl.add_trace(go.Scatter(
+                x=ts["week"], y=ts["val"], name=bt, mode="lines+markers",
+                line=dict(color=BL_COLORS.get(bt, "#aaa"), width=2),
+                marker=dict(size=6),
+            ))
+        fig_bl.update_layout(
+            title="Тренд ошибок по блокам (по неделям, без воскресений)",
+            height=320, legend=dict(orientation="h", y=-0.2),
+            margin=dict(l=40, r=20, t=50, b=80),
+            plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
+            xaxis_title="Неделя", yaxis_title="Σ val",
+        )
+        charts["weekly_block"] = fig_bl.to_html(full_html=False, include_plotlyjs=False)
+
     # 9. Product drill-down: dropdown selector → bar chart by block_type or lvl_4 per day
     pd_data = results.get("product_dynamics", {})
     block_matrix = pd_data.get("block_matrix", {})
@@ -1042,6 +1089,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <!-- Trends -->
   <div class="section">
     <h2>📈 Тренды по метрикам</h2>
+    {% if charts.weekly_channel or charts.weekly_block %}
+    <div class="two-col" style="margin-bottom:16px;">
+      {% if charts.weekly_channel %}<div>{{ charts.weekly_channel }}</div>{% endif %}
+      {% if charts.weekly_block  %}<div>{{ charts.weekly_block  }}</div>{% endif %}
+    </div>
+    {% endif %}
     {% if charts.trend_lines %}
     {{ charts.trend_lines }}
     {% endif %}
