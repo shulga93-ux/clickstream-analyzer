@@ -258,19 +258,41 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
     BL_COLORS = {"боевой": "#e74c3c", "пилотный": "#27ae60", "резервный": "#3498db", "неизвестный": "#bbb"}
 
     if weeks:
+        import numpy as _np2
+
+        def _add_trendline(fig, x_labels, y_vals, color, name):
+            """Add dashed linear trend line to figure."""
+            n = len(y_vals)
+            if n < 2:
+                return
+            x_num = _np2.arange(n, dtype=float)
+            coeffs = _np2.polyfit(x_num, y_vals, 1)
+            y_trend = _np2.polyval(coeffs, x_num)
+            pct = round((y_trend[-1] - y_trend[0]) / y_trend[0] * 100, 1) if y_trend[0] != 0 else 0
+            sign = "+" if pct > 0 else ""
+            fig.add_trace(go.Scatter(
+                x=x_labels, y=y_trend,
+                name=f"{name} тренд ({sign}{pct}%)",
+                mode="lines",
+                line=dict(color=color, width=2, dash="dash"),
+                opacity=0.55,
+            ))
+
         # Channel weekly trend
         fig_ch = go.Figure()
         for ch, series in wt.get("by_channel", {}).items():
             ts = pd.DataFrame(series)
+            color = CH_COLORS.get(ch, "#aaa")
+            y_vals = ts["val"].values.astype(float)
             fig_ch.add_trace(go.Scatter(
-                x=ts["week"], y=ts["val"], name=ch, mode="lines+markers",
-                line=dict(color=CH_COLORS.get(ch, "#aaa"), width=2),
-                marker=dict(size=6),
+                x=ts["week"], y=y_vals, name=ch, mode="lines+markers",
+                line=dict(color=color, width=2), marker=dict(size=6),
             ))
+            _add_trendline(fig_ch, ts["week"].tolist(), y_vals, color, ch)
         fig_ch.update_layout(
             title="Тренд ошибок по каналам (по неделям, без воскресений)",
-            height=320, legend=dict(orientation="h", y=-0.2),
-            margin=dict(l=40, r=20, t=50, b=80),
+            height=340, legend=dict(orientation="h", y=-0.22),
+            margin=dict(l=40, r=20, t=50, b=90),
             plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
             xaxis_title="Неделя", yaxis_title="Σ val",
         )
@@ -284,15 +306,17 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             if not series:
                 continue
             ts = pd.DataFrame(series)
+            color = BL_COLORS.get(bt, "#aaa")
+            y_vals = ts["val"].values.astype(float)
             fig_bl.add_trace(go.Scatter(
-                x=ts["week"], y=ts["val"], name=bt, mode="lines+markers",
-                line=dict(color=BL_COLORS.get(bt, "#aaa"), width=2),
-                marker=dict(size=6),
+                x=ts["week"], y=y_vals, name=bt, mode="lines+markers",
+                line=dict(color=color, width=2), marker=dict(size=6),
             ))
+            _add_trendline(fig_bl, ts["week"].tolist(), y_vals, color, bt)
         fig_bl.update_layout(
             title="Тренд ошибок по блокам (по неделям, без воскресений)",
-            height=320, legend=dict(orientation="h", y=-0.2),
-            margin=dict(l=40, r=20, t=50, b=80),
+            height=340, legend=dict(orientation="h", y=-0.22),
+            margin=dict(l=40, r=20, t=50, b=90),
             plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
             xaxis_title="Неделя", yaxis_title="Σ val",
         )
