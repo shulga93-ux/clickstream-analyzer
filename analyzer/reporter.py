@@ -1375,8 +1375,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endmacro %}
 
     <h3 style="font-size:0.95rem;font-weight:600;margin:20px 0 10px;color:#444;">По каналам</h3>
-    <div class="two-col" style="margin-top:0;">
-      <div>
+    <div style="margin-top:0;">
+      <div style="margin-bottom:24px;">
         <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:8px;color:#555;">🖥️ Web (АРМ)</h3>
         {{ ch_table(ch_data.get('Web (АРМ)', []), 'pd_web_tbl') }}
       </div>
