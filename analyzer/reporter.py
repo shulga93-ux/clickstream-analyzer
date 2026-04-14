@@ -430,6 +430,112 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
     dates_pd = pd_data.get("dates", [])
     products_meta = pd_data.get("products", [])
 
+    # 9a. All-types status drill (Ошибка + Успех + Ожидание + Информирование per product per day)
+    use_lvl4_check = bool(lvl4_matrix and any(lvl4_matrix.values()))
+    if use_lvl4_check and dates_pd and products_meta:
+        ALL_LVL4_COLORS = {
+            "Ошибка":         "#e74c3c",
+            "Ожидание":       "#f39c12",
+            "Информирование": "#3498db",
+            "Успех":          "#27ae60",
+        }
+        ALL_KEYS = ["Успех", "Информирование", "Ожидание", "Ошибка"]
+
+        all_traces_s = []
+        vis_map_s = {}
+        idx_s = 0
+
+        for pm in products_meta:
+            p = pm["name"]
+            prod_vis = []
+            for key in ALL_KEYS:
+                kdata = lvl4_matrix.get(p, {}).get(key, {})
+                y_vals = [kdata.get(d, 0) for d in dates_pd]
+                if sum(y_vals) == 0:
+                    continue
+                is_first = (idx_s == sum(len(v) for v in vis_map_s.values()))
+                tr = go.Bar(
+                    x=dates_pd, y=y_vals, name=key,
+                    marker_color=ALL_LVL4_COLORS.get(key, "#aaa"),
+                    legendgroup=key,
+                    showlegend=(len(vis_map_s) == 0),
+                    visible=(len(vis_map_s) == 0),
+                )
+                all_traces_s.append(tr)
+                prod_vis.append(idx_s)
+                idx_s += 1
+            vis_map_s[p] = prod_vis
+
+        total_traces_s = idx_s
+        if all_traces_s:
+            first_pm = products_meta[0]
+            fig_s = go.Figure(data=all_traces_s)
+            fig_s.update_layout(
+                title=f"📦 {first_pm['name']}  |  все типы",
+                barmode="stack",
+                height=420,
+                margin=dict(l=40, r=40, t=60, b=60),
+                plot_bgcolor="#fafafa",
+                paper_bgcolor="#ffffff",
+                xaxis_title="Дата",
+                yaxis=dict(title="Кол-во событий (val)", side="left"),
+                legend=dict(orientation="h", y=-0.18),
+            )
+            fig_s_html = fig_s.to_html(full_html=False, include_plotlyjs=False)
+
+            import json as _json2
+            js_data_s = {
+                "visMap": vis_map_s,
+                "totalTraces": total_traces_s,
+                "products": {pm["name"]: {"total_val": pm["total_val"]} for pm in products_meta},
+                "productOrder": [pm["name"] for pm in products_meta],
+            }
+            js_s_str = _json2.dumps(js_data_s, ensure_ascii=False)
+
+            sel_opts_s = "".join(
+                f'<option value="{pm["name"]}">{pm["name"]}</option>\n'
+                for pm in products_meta
+            )
+            sdrill_uid = "sdrill_" + str(abs(hash(str(products_meta[0]["name"]))))[:8]
+
+            charts["status_drill"] = f"""
+<div id="{sdrill_uid}_wrap">
+  <div style="margin-bottom:10px;">
+    <label style="font-size:0.85rem;color:#555;margin-right:8px;font-weight:600;">Продукт:</label>
+    <select id="{sdrill_uid}_sel" onchange="sdrillUpdate_{sdrill_uid}(this.value)"
+            style="padding:6px 12px;border-radius:6px;border:1.5px solid #d0d7de;
+                   font-size:0.9rem;min-width:340px;cursor:pointer;">
+      {sel_opts_s}
+    </select>
+  </div>
+  <div id="{sdrill_uid}_chart">{fig_s_html}</div>
+</div>
+<script>
+(function() {{
+  const UID = "{sdrill_uid}";
+  const D = {js_s_str};
+  function fmtNum(n) {{ return n == null ? "—" : n.toLocaleString("ru-RU"); }}
+  function sdrillUpdate(name) {{
+    const chartDiv = document.querySelector("#{sdrill_uid}_chart .js-plotly-plot");
+    if (!chartDiv) return;
+    const visIndices = D.visMap[name] || [];
+    const vis = Array(D.totalTraces).fill(false);
+    visIndices.forEach(i => vis[i] = true);
+    const pm = D.products[name];
+    Plotly.update(chartDiv,
+      {{"visible": vis, "showlegend": vis}},
+      {{"title.text": "📦 " + name + "  |  все типы"}}
+    );
+  }}
+  window["sdrillUpdate_" + UID] = sdrillUpdate;
+  document.addEventListener("DOMContentLoaded", function() {{
+    const sel = document.getElementById(UID + "_sel");
+    if (sel) sdrillUpdate(sel.value);
+  }});
+}})();
+</script>
+"""
+
     # Use lvl_4 breakdown if available (metric 55558), otherwise block_type
     use_lvl4 = bool(lvl4_matrix and any(lvl4_matrix.values()))
     primary_matrix = lvl4_matrix if use_lvl4 else block_matrix
@@ -1046,6 +1152,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
 
   <!-- Product drill-down: dropdown → bar by block_type + channel lines -->
+  {% if charts.status_drill %}
+  <div class="section">
+    <h2>📊 Динамика статусных экранов по продукту день за днём</h2>
+    <p style="color:#888;font-size:0.85rem;margin-bottom:12px;">
+      Все типы: Успех / Ожидание / Информирование / Ошибка — стековые столбцы по дням.
+    </p>
+    {{ charts.status_drill }}
+  </div>
+  {% endif %}
+
   {% if charts.product_drill %}
   <div class="section">
     <h2>🗓️ Динамика ОШИБОК по продукту день за днём</h2>
