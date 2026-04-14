@@ -173,56 +173,71 @@ def detect_trends(df: pd.DataFrame) -> dict:
     }
 
 
-# ─── 3. DoD: last date vs D-1 ────────────────────────────────────────────────
+# ─── 3. DoD: each weekday vs same weekday -7 days (no Sundays) ───────────────
 
 def detect_dod(df: pd.DataFrame) -> list:
-    """Compare last date vs D-1 across all group dimensions.
-    Threshold: |pct| > 50 and |delta| > 5, sorted by |delta| desc.
+    """Compare each weekday vs same weekday -7 days across all available dates.
+    Excludes Sundays (weekday == 6).
+    Threshold: |pct| > 50 and |delta| > 5.
+    Returns all deviations sorted by |delta| desc (reporter limits to top 50).
     """
+    import datetime as _dt
+
+    WEEKDAY_RU = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+
     df2 = df.copy()
     df2["date"] = df2["report_dt"].dt.date
-    dates = sorted(df2["date"].unique())
+    dates_set = set(df2["date"].unique())
+    dates = sorted(dates_set)
 
     if len(dates) < 2:
         return []
 
-    d_curr = dates[-1]
-    d_prev = dates[-2]
-
-    # ensure all group cols are present
     available_cols = [c for c in _GROUP_COLS if c in df2.columns]
     grp_cols = available_cols
 
-    curr = df2[df2["date"] == d_curr].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_curr"})
-    prev = df2[df2["date"] == d_prev].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_prev"})
+    all_deviations = []
 
-    merged = curr.merge(prev, on=grp_cols, how="outer").fillna(0)
-    merged["val_curr"] = merged["val_curr"].astype(int)
-    merged["val_prev"] = merged["val_prev"].astype(int)
+    for d_curr in dates:
+        # Skip Sundays
+        if d_curr.weekday() == 6:
+            continue
 
-    merged = merged[merged["val_prev"] > 0].copy()
-    merged["delta"] = merged["val_curr"] - merged["val_prev"]
-    merged["pct"] = (merged["delta"] / merged["val_prev"] * 100).round(1)
+        d_prev = d_curr - _dt.timedelta(days=7)
+        if d_prev not in dates_set:
+            continue
 
-    flagged = merged[(merged["pct"].abs() > 50) & (merged["delta"].abs() > 5)].copy()
-    flagged = flagged.sort_values("delta", key=abs, ascending=False)
+        curr_df = df2[df2["date"] == d_curr].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_curr"})
+        prev_df = df2[df2["date"] == d_prev].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_prev"})
 
-    result = []
-    for _, row in flagged.iterrows():
-        r = {
-            "date_from": str(d_prev),
-            "date_to": str(d_curr),
-            "direction": "spike" if row["delta"] > 0 else "drop",
-            "delta": int(row["delta"]),
-            "pct": float(row["pct"]),
-            "val_prev": int(row["val_prev"]),
-            "val_curr": int(row["val_curr"]),
-        }
-        for col in grp_cols:
-            r[col] = str(row[col]) if col in row else ""
-        result.append(r)
+        merged = curr_df.merge(prev_df, on=grp_cols, how="outer").fillna(0)
+        merged["val_curr"] = merged["val_curr"].astype(int)
+        merged["val_prev"] = merged["val_prev"].astype(int)
+        merged = merged[merged["val_prev"] > 0].copy()
+        merged["delta"] = merged["val_curr"] - merged["val_prev"]
+        merged["pct"] = (merged["delta"] / merged["val_prev"] * 100).round(1)
 
-    return result
+        flagged = merged[(merged["pct"].abs() > 50) & (merged["delta"].abs() > 5)].copy()
+
+        weekday_name = WEEKDAY_RU[d_curr.weekday()]
+
+        for _, row in flagged.iterrows():
+            r = {
+                "date_from": str(d_prev),
+                "date_to": str(d_curr),
+                "weekday": weekday_name,
+                "direction": "spike" if row["delta"] > 0 else "drop",
+                "delta": int(row["delta"]),
+                "pct": float(row["pct"]),
+                "val_prev": int(row["val_prev"]),
+                "val_curr": int(row["val_curr"]),
+            }
+            for col in grp_cols:
+                r[col] = str(row[col]) if col in row else ""
+            all_deviations.append(r)
+
+    all_deviations.sort(key=lambda x: abs(x["delta"]), reverse=True)
+    return all_deviations
 
 
 # ─── 4. WoW: last 7 days vs previous 7 days (full week vs full week) ──────────

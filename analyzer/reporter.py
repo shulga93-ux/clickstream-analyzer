@@ -106,20 +106,22 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
     wow = results.get("wow", [])
     wow_grouped = _group_by_product(wow) if wow else []
 
-    # 3. DoD deviations — grouped by product, stored as data for HTML table
+    # 3. DoD deviations — raw day-vs-same-weekday rows (no product grouping)
     dod = results.get("dod", [])
-    dod_grouped = _group_by_product(dod) if dod else []
 
     # Store in charts dict as JSON-serialisable data (rendered via template table)
     charts["wow_grouped"] = wow_grouped[:20]
-    charts["dod_grouped"] = dod_grouped[:50]
+    charts["dod_grouped"] = dod[:50]   # top 50 already sorted by |delta|
     charts["wow_meta"] = {
         "curr_week_start": wow[0].get("curr_week_start", wow[0]["date_from"]),
         "curr_week_end":   wow[0].get("curr_week_end",   wow[0]["date_to"]),
         "prev_week_start": wow[0].get("prev_week_start", wow[0]["date_from"]),
         "prev_week_end":   wow[0].get("prev_week_end",   wow[0]["date_to"]),
     } if wow else {}
-    charts["dod_meta"] = {"date_from": dod[0]["date_from"], "date_to": dod[0]["date_to"]} if dod else {}
+    charts["dod_meta"] = {
+        "date_from": min(r["date_from"] for r in dod) if dod else "",
+        "date_to":   max(r["date_to"]   for r in dod) if dod else "",
+    }
 
     # 4. Top-20 services horizontal bar
     top_services = results.get("top_services", [])
@@ -628,140 +630,206 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <div class="chart-card">{{ charts.timeline }}</div>
   {% endif %}
 
-  <!-- WoW & DoD side by side -->
-  <div class="two-col">
-
-    {# Macro: deviation table with inline bar.
-       sortable=True добавляет сортировку по клику на заголовки.
-       default_sort_col — индекс колонки для дефолтной сортировки (0-based).
-       default_sort_dir — "asc" или "desc". #}
-    {% macro dev_table(rows, meta, col_prev="Было", col_curr="Стало", sortable=False, table_id="dev_tbl", default_sort_col=3, default_sort_dir="desc") %}
-    {% if rows %}
-    {% set max_delta = namespace(v=1) %}
-    {% for r in rows %}{% if r.delta | abs > max_delta.v %}{% set max_delta.v = r.delta | abs %}{% endif %}{% endfor %}
-    <div style="overflow-x:auto;">
-    <table class="stat-table dev-tbl" {% if sortable %}id="{{ table_id }}"{% endif %}>
-      <thead>
-        <tr>
-          {% if sortable %}
-          <th style="width:36%;cursor:pointer;user-select:none;white-space:nowrap;" data-col="0">Продукт <span class="si">⇅</span></th>
-          <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
-          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">{{ col_prev }} <span class="si">⇅</span></th>
-          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">{{ col_curr }} <span class="si">⇅</span></th>
-          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Δval <span class="si">⇅</span></th>
-          <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">% <span class="si">⇅</span></th>
-          {% else %}
-          <th style="width:36%">Продукт</th>
-          <th>Сегмент</th>
-          <th style="text-align:right">{{ col_prev }}</th>
-          <th style="text-align:right">{{ col_curr }}</th>
-          <th style="text-align:right">Δval</th>
-          <th style="text-align:right">%</th>
-          {% endif %}
-          <th style="width:80px"></th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for r in rows %}
-      {% set is_up = r.delta > 0 %}
-      {% set bar_w = ((r.delta | abs) / max_delta.v * 76) | int %}
+  {# ─── Macro: WoW table (sortable) ─── #}
+  {% macro wow_table(rows) %}
+  {% if rows %}
+  {% set max_delta = namespace(v=1) %}
+  {% for r in rows %}{% if r.delta | abs > max_delta.v %}{% set max_delta.v = r.delta | abs %}{% endif %}{% endfor %}
+  <div style="overflow-x:auto;">
+  <table class="stat-table dev-tbl" id="wow_dev_tbl">
+    <thead>
       <tr>
-        <td data-val="{{ r.lvl_2 }}"><strong>{{ r.lvl_2 }}</strong></td>
-        <td data-val="{{ r.segment }}" style="color:#666;font-size:0.82rem;">{{ r.segment }}</td>
-        <td data-val="{{ r.val_prev }}" style="text-align:right;color:#888;">{{ "{:,}".format(r.val_prev) }}</td>
-        <td data-val="{{ r.val_curr }}" style="text-align:right;">{{ "{:,}".format(r.val_curr) }}</td>
-        <td data-val="{{ r.delta }}" style="text-align:right;font-weight:700;color:{{ '#e74c3c' if is_up else '#3498db' }};">
-          {{ '+' if is_up else '' }}{{ "{:,}".format(r.delta) }}
-        </td>
-        <td data-val="{{ r.pct }}" style="text-align:right;font-weight:600;color:{{ '#e74c3c' if is_up else '#3498db' }};">
-          {{ '+' if is_up else '' }}{{ r.pct }}%
-        </td>
-        <td>
-          <div style="background:{{ '#e74c3c' if is_up else '#3498db' }};height:10px;border-radius:3px;width:{{ bar_w }}px;min-width:2px;"></div>
-        </td>
+        <th style="width:34%;cursor:pointer;user-select:none;white-space:nowrap;" data-col="0">Продукт <span class="si">⇅</span></th>
+        <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Пред. неделя (Σ ошибок) <span class="si">⇅</span></th>
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Тек. неделя (Σ ошибок) <span class="si">⇅</span></th>
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Δval <span class="si">⇅</span></th>
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">% <span class="si">⇅</span></th>
+        <th style="width:80px;"></th>
       </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    {% if sortable %}
-    <script>
-    (function() {
-      var TID = "{{ table_id }}";
-      var sortState = { col: null, dir: null };
-
-      function updateIcons(tbl, activeCol, dir) {
-        tbl.querySelectorAll("thead th[data-col] .si").forEach(function(span) {
-          var col = parseInt(span.parentNode.getAttribute("data-col"));
-          span.textContent = col === activeCol ? (dir === "desc" ? " ▼" : " ▲") : " ⇅";
-          span.style.color = col === activeCol ? "#4f8ef7" : "#bbb";
-        });
-      }
-
-      function sortTable(tbl, col, dir) {
-        var tbody = tbl.querySelector("tbody");
-        var rows = Array.from(tbody.querySelectorAll("tr"));
-        rows.sort(function(a, b) {
-          var av = a.cells[col] ? (a.cells[col].getAttribute("data-val") || "") : "";
-          var bv = b.cells[col] ? (b.cells[col].getAttribute("data-val") || "") : "";
-          var an = parseFloat(av), bn = parseFloat(bv);
-          var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru");
-          return dir === "desc" ? -cmp : cmp;
-        });
-        rows.forEach(function(r) { tbody.appendChild(r); });
-        sortState.col = col;
-        sortState.dir = dir;
-        updateIcons(tbl, col, dir);
-      }
-
-      document.addEventListener("DOMContentLoaded", function() {
-        var tbl = document.getElementById(TID);
-        if (!tbl) return;
-        tbl.querySelectorAll("thead th[data-col]").forEach(function(th) {
-          th.style.cursor = "pointer";
-          th.addEventListener("click", function() {
-            var col = parseInt(th.getAttribute("data-col"));
-            var dir = (sortState.col === col && sortState.dir === "asc") ? "desc" : "asc";
-            sortTable(tbl, col, dir);
-          });
-        });
-        sortTable(tbl, {{ default_sort_col }}, "{{ default_sort_dir }}");
+    </thead>
+    <tbody>
+    {% for r in rows %}
+    {% set is_up = r.delta > 0 %}
+    {% set bar_w = ((r.delta | abs) / max_delta.v * 76) | int %}
+    <tr>
+      <td data-val="{{ r.lvl_2 }}"><strong>{{ r.lvl_2 }}</strong></td>
+      <td data-val="{{ r.segment }}" style="color:#666;font-size:0.82rem;">{{ r.segment }}</td>
+      <td data-val="{{ r.val_prev }}" style="text-align:right;color:#888;">{{ "{:,}".format(r.val_prev) }}</td>
+      <td data-val="{{ r.val_curr }}" style="text-align:right;">{{ "{:,}".format(r.val_curr) }}</td>
+      <td data-val="{{ r.delta }}" style="text-align:right;font-weight:700;color:{{ '#e74c3c' if is_up else '#3498db' }};">
+        {{ '+' if is_up else '' }}{{ "{:,}".format(r.delta) }}
+      </td>
+      <td data-val="{{ r.pct }}" style="text-align:right;font-weight:600;color:{{ '#e74c3c' if is_up else '#3498db' }};">
+        {{ '+' if is_up else '' }}{{ r.pct }}%
+      </td>
+      <td>
+        <div style="background:{{ '#e74c3c' if is_up else '#3498db' }};height:10px;border-radius:3px;width:{{ bar_w }}px;min-width:2px;"></div>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <script>
+  (function() {
+    var TID = "wow_dev_tbl";
+    var sortState = { col: null, dir: null };
+    function updateIcons(tbl, activeCol, dir) {
+      tbl.querySelectorAll("thead th[data-col] .si").forEach(function(span) {
+        var col = parseInt(span.parentNode.getAttribute("data-col"));
+        span.textContent = col === activeCol ? (dir === "desc" ? " ▼" : " ▲") : " ⇅";
+        span.style.color = col === activeCol ? "#4f8ef7" : "#bbb";
       });
-    })();
-    </script>
-    {% endif %}
+    }
+    function sortTable(tbl, col, dir) {
+      var tbody = tbl.querySelector("tbody");
+      var rows = Array.from(tbody.querySelectorAll("tr"));
+      rows.sort(function(a, b) {
+        var av = a.cells[col] ? (a.cells[col].getAttribute("data-val") || "") : "";
+        var bv = b.cells[col] ? (b.cells[col].getAttribute("data-val") || "") : "";
+        var an = parseFloat(av), bn = parseFloat(bv);
+        var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru");
+        return dir === "desc" ? -cmp : cmp;
+      });
+      rows.forEach(function(r) { tbody.appendChild(r); });
+      sortState.col = col; sortState.dir = dir;
+      updateIcons(tbl, col, dir);
+    }
+    document.addEventListener("DOMContentLoaded", function() {
+      var tbl = document.getElementById(TID);
+      if (!tbl) return;
+      tbl.querySelectorAll("thead th[data-col]").forEach(function(th) {
+        th.addEventListener("click", function() {
+          var col = parseInt(th.getAttribute("data-col"));
+          var dir = (sortState.col === col && sortState.dir === "asc") ? "desc" : "asc";
+          sortTable(tbl, col, dir);
+        });
+      });
+      sortTable(tbl, 3, "desc");
+    });
+  })();
+  </script>
+  {% else %}
+  <div class="empty-state">✅ WoW отклонений нет</div>
+  {% endif %}
+  {% endmacro %}
+
+  {# ─── Macro: DoD table (sortable, day/date column) ─── #}
+  {% macro dod_table(rows) %}
+  {% if rows %}
+  {% set max_delta = namespace(v=1) %}
+  {% for r in rows %}{% if r.delta | abs > max_delta.v %}{% set max_delta.v = r.delta | abs %}{% endif %}{% endfor %}
+  <div style="overflow-x:auto;">
+  <table class="stat-table dev-tbl" id="dod_dev_tbl">
+    <thead>
+      <tr>
+        <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="0">День / Дата <span class="si">⇅</span></th>
+        <th style="width:28%;cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Продукт <span class="si">⇅</span></th>
+        <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Сегмент <span class="si">⇅</span></th>
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Пред. неделя <span class="si">⇅</span></th>
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Тек. день <span class="si">⇅</span></th>
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">Δval <span class="si">⇅</span></th>
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="6">% <span class="si">⇅</span></th>
+        <th style="width:70px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+    {% set is_up = r.delta > 0 %}
+    {% set bar_w = ((r.delta | abs) / max_delta.v * 68) | int %}
+    <tr>
+      <td data-val="{{ r.date_to }}" style="white-space:nowrap;font-size:0.82rem;">
+        <strong>{{ r.weekday }}</strong><br><span style="color:#888;">{{ r.date_to }}</span>
+      </td>
+      <td data-val="{{ r.lvl_2 }}"><strong>{{ r.lvl_2 }}</strong></td>
+      <td data-val="{{ r.segment }}" style="color:#666;font-size:0.82rem;">{{ r.segment }}</td>
+      <td data-val="{{ r.val_prev }}" style="text-align:right;color:#888;">{{ "{:,}".format(r.val_prev) }}</td>
+      <td data-val="{{ r.val_curr }}" style="text-align:right;">{{ "{:,}".format(r.val_curr) }}</td>
+      <td data-val="{{ r.delta }}" style="text-align:right;font-weight:700;color:{{ '#e74c3c' if is_up else '#3498db' }};">
+        {{ '+' if is_up else '' }}{{ "{:,}".format(r.delta) }}
+      </td>
+      <td data-val="{{ r.pct }}" style="text-align:right;font-weight:600;color:{{ '#e74c3c' if is_up else '#3498db' }};">
+        {{ '+' if is_up else '' }}{{ r.pct }}%
+      </td>
+      <td>
+        <div style="background:{{ '#e74c3c' if is_up else '#3498db' }};height:10px;border-radius:3px;width:{{ bar_w }}px;min-width:2px;"></div>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <script>
+  (function() {
+    var TID = "dod_dev_tbl";
+    var sortState = { col: null, dir: null };
+    function updateIcons(tbl, activeCol, dir) {
+      tbl.querySelectorAll("thead th[data-col] .si").forEach(function(span) {
+        var col = parseInt(span.parentNode.getAttribute("data-col"));
+        span.textContent = col === activeCol ? (dir === "desc" ? " ▼" : " ▲") : " ⇅";
+        span.style.color = col === activeCol ? "#4f8ef7" : "#bbb";
+      });
+    }
+    function sortTable(tbl, col, dir) {
+      var tbody = tbl.querySelector("tbody");
+      var rows = Array.from(tbody.querySelectorAll("tr"));
+      rows.sort(function(a, b) {
+        var av = a.cells[col] ? (a.cells[col].getAttribute("data-val") || "") : "";
+        var bv = b.cells[col] ? (b.cells[col].getAttribute("data-val") || "") : "";
+        var an = parseFloat(av), bn = parseFloat(bv);
+        var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru");
+        return dir === "desc" ? -cmp : cmp;
+      });
+      rows.forEach(function(r) { tbody.appendChild(r); });
+      sortState.col = col; sortState.dir = dir;
+      updateIcons(tbl, col, dir);
+    }
+    document.addEventListener("DOMContentLoaded", function() {
+      var tbl = document.getElementById(TID);
+      if (!tbl) return;
+      tbl.querySelectorAll("thead th[data-col]").forEach(function(th) {
+        th.addEventListener("click", function() {
+          var col = parseInt(th.getAttribute("data-col"));
+          var dir = (sortState.col === col && sortState.dir === "asc") ? "desc" : "asc";
+          sortTable(tbl, col, dir);
+        });
+      });
+      sortTable(tbl, 5, "desc");
+    });
+  })();
+  </script>
+  {% else %}
+  <div class="empty-state">✅ DoD отклонений нет</div>
+  {% endif %}
+  {% endmacro %}
+
+  <!-- WoW section (full width) -->
+  <div class="section">
+    <h2>📅 Топ-20 продуктов с WoW отклонениями — неделя к неделе
+      {% if wow_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">
+        Тек.: {{ wow_meta.curr_week_start }}–{{ wow_meta.curr_week_end }}
+        &nbsp;vs&nbsp;
+        Пред.: {{ wow_meta.prev_week_start }}–{{ wow_meta.prev_week_end }}
+      </span>{% endif %}
+    </h2>
+    {% if wow_grouped %}
+      {{ wow_table(wow_grouped) }}
     {% else %}
-    <div class="empty-state">✅ Отклонений нет</div>
+      <div class="empty-state">✅ WoW отклонений нет (нет данных за предыдущие 7 дней или ниже порога)</div>
     {% endif %}
-    {% endmacro %}
+  </div>
 
-    <!-- WoW -->
-    <div class="section">
-      <h2>📅 Топ-20 продуктов с WoW отклонениями — неделя к неделе
-        {% if wow_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">
-          Тек.: {{ wow_meta.curr_week_start }}–{{ wow_meta.curr_week_end }}
-          &nbsp;vs&nbsp;
-          Пред.: {{ wow_meta.prev_week_start }}–{{ wow_meta.prev_week_end }}
-        </span>{% endif %}
-      </h2>
-      {% if wow_grouped %}
-        {{ dev_table(wow_grouped, wow_meta, col_prev="Пред. неделя (Σ ошибок)", col_curr="Тек. неделя (Σ ошибок)", sortable=True, table_id="wow_dev_tbl", default_sort_col=3, default_sort_dir="desc") }}
-      {% else %}
-        <div class="empty-state">✅ WoW отклонений нет (нет данных за предыдущие 7 дней или ниже порога)</div>
-      {% endif %}
-    </div>
-
-    <!-- DoD -->
-    <div class="section">
-      <h2>📆 DoD отклонения — {{ dod_grouped | length }} продуктов
-        {% if dod_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">{{ dod_meta.date_from }} vs {{ dod_meta.date_to }}</span>{% endif %}
-      </h2>
-      {% if dod_grouped %}
-        {{ dev_table(dod_grouped, dod_meta) }}
-      {% else %}
-        <div class="empty-state">✅ DoD отклонений нет (ниже порога >50%)</div>
-      {% endif %}
-    </div>
+  <!-- DoD section (full width) -->
+  <div class="section">
+    <h2>📆 Топ-50 DoD отклонений — день недели к тому же дню предыдущей недели
+      {% if dod_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">{{ dod_meta.date_from }} – {{ dod_meta.date_to }}</span>{% endif %}
+    </h2>
+    {% if dod_grouped %}
+      {{ dod_table(dod_grouped) }}
+    {% else %}
+      <div class="empty-state">✅ DoD отклонений нет (ниже порога >50% или нет пар с предыдущей неделей)</div>
+    {% endif %}
   </div>
 
   <!-- Product drill-down: dropdown → bar by block_type + channel lines -->
