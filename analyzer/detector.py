@@ -196,13 +196,13 @@ def detect_dod(df: pd.DataFrame) -> list:
     available_cols = [c for c in _GROUP_COLS if c in df2.columns]
     grp_cols = available_cols
 
+    # Take only last 7 non-Sunday dates
+    non_sunday_dates = [d for d in dates if d.weekday() != 6]
+    recent_dates = non_sunday_dates[-7:] if len(non_sunday_dates) >= 7 else non_sunday_dates
+
     all_deviations = []
 
-    for d_curr in dates:
-        # Skip Sundays
-        if d_curr.weekday() == 6:
-            continue
-
+    for d_curr in recent_dates:
         d_prev = d_curr - _dt.timedelta(days=7)
         if d_prev not in dates_set:
             continue

@@ -688,8 +688,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       rows.sort(function(a, b) {
         var av = a.cells[col] ? (a.cells[col].getAttribute("data-val") || "") : "";
         var bv = b.cells[col] ? (b.cells[col].getAttribute("data-val") || "") : "";
+        var isDate = /^\\d{4}-\\d{2}-\\d{2}$/.test(av) && /^\\d{4}-\\d{2}-\\d{2}$/.test(bv);
         var an = parseFloat(av), bn = parseFloat(bv);
-        var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru");
+        var cmp = isDate ? av.localeCompare(bv) : ((!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru"));
         return dir === "desc" ? -cmp : cmp;
       });
       rows.forEach(function(r) { tbody.appendChild(r); });
@@ -777,8 +778,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       rows.sort(function(a, b) {
         var av = a.cells[col] ? (a.cells[col].getAttribute("data-val") || "") : "";
         var bv = b.cells[col] ? (b.cells[col].getAttribute("data-val") || "") : "";
+        var isDate = /^\\d{4}-\\d{2}-\\d{2}$/.test(av) && /^\\d{4}-\\d{2}-\\d{2}$/.test(bv);
         var an = parseFloat(av), bn = parseFloat(bv);
-        var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru");
+        var cmp = isDate ? av.localeCompare(bv) : ((!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru"));
         return dir === "desc" ? -cmp : cmp;
       });
       rows.forEach(function(r) { tbody.appendChild(r); });
