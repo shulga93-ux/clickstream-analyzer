@@ -6,17 +6,18 @@ from pathlib import Path
 from jinja2 import Template
 
 
-def generate_report(df: pd.DataFrame, summary: dict, results: dict, output_path: str) -> str:
+def generate_report(df: pd.DataFrame, summary: dict, results: dict, output_path: str,
+                    metric_id: str = "") -> str:
     """Generate a full HTML report for СБОЛ.про metrics format."""
-    charts = _build_charts(df, results)
-    html = _render_html(summary, results, charts)
+    charts = _build_charts(df, results, metric_id=metric_id)
+    html = _render_html(summary, results, charts, metric_id=metric_id)
     Path(output_path).write_text(html, encoding="utf-8")
     return output_path
 
 
 # ─── Chart builders ──────────────────────────────────────────────────────────
 
-def _build_charts(df: pd.DataFrame, results: dict) -> dict:
+def _build_charts(df: pd.DataFrame, results: dict, metric_id: str = "") -> dict:
     charts = {}
     COLORS = px.colors.qualitative.Set2
     COLORS_SEQ = px.colors.sequential.Blues
@@ -557,8 +558,9 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             "iPad (Планшеты)": "#9b59b6",
             "Web (АРМ)":       "#e67e22",
         }
+        is_ss = (metric_id == "55558")
         if use_lvl4:
-            primary_keys = ["Ошибка"]
+            primary_keys = ["Ошибка"] if is_ss else ["Ошибка", "Ожидание", "Информирование", "Успех"]
             primary_colors = LVL4_COLORS
             group_label = "Тип экрана"
         else:
@@ -594,8 +596,8 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
                     "showlegend": True,
                 })
 
-            # Ошибка/Успех ratio line (only for lvl4 mode)
-            if use_lvl4:
+            if is_ss:
+                # 55558: ratio line Ошибка/Успех, no channel lines
                 err_data = pd_data.get("matrix", {}).get(p, {})
                 suc_data = pd_data.get("success_matrix", {}).get(p, {})
                 ratio_vals = []
@@ -614,8 +616,23 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
                         "showlegend": True,
                         "yaxis": "y2",
                     })
-
-            # Channel lines removed — only Ошибка bars + ratio line shown
+            else:
+                # Тех Ошибка: channel lines on secondary axis
+                for ch in channel_names:
+                    chdata = channel_matrix.get(p, {}).get(ch, {})
+                    y_vals = [chdata.get(d, 0) for d in dates_pd]
+                    if sum(y_vals) == 0:
+                        continue
+                    product_traces.append({
+                        "x": dates_pd, "y": y_vals,
+                        "name": ch, "type": "scatter",
+                        "mode": "lines+markers",
+                        "line": {"color": CHANNEL_COLORS.get(ch, "#888"), "width": 2, "dash": "dot"},
+                        "marker": {"size": 5},
+                        "legendgroup": ch,
+                        "showlegend": True,
+                        "yaxis": "y2",
+                    })
 
             traces_per_product.append(product_traces)
 
@@ -788,7 +805,7 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
 
 # ─── HTML rendering ──────────────────────────────────────────────────────────
 
-def _render_html(summary: dict, results: dict, charts: dict) -> str:
+def _render_html(summary: dict, results: dict, charts: dict, metric_id: str = "") -> str:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     anomalies = sorted(results.get("anomalies", []), key=lambda a: a.get("timestamp", ""))
     wow = results.get("wow", [])
@@ -819,6 +836,8 @@ def _render_html(summary: dict, results: dict, charts: dict) -> str:
         ss=ss,
         charts=charts,
         pd_data=pd_data,
+        metric_id=metric_id,
+        is_status_screen=(metric_id == "55558"),
     )
 
 
@@ -1152,7 +1171,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
 
   <!-- Product drill-down: dropdown → bar by block_type + channel lines -->
-  {% if charts.status_drill %}
+  {% if is_status_screen and charts.status_drill %}
   <div class="section">
     <h2>📊 Динамика статусных экранов по продукту день за днём</h2>
     <p style="color:#888;font-size:0.85rem;margin-bottom:12px;">
@@ -1164,9 +1183,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
   {% if charts.product_drill %}
   <div class="section">
-    <h2>🗓️ Динамика ОШИБОК по продукту день за днём</h2>
+    <h2>🗓️ {% if is_status_screen %}Динамика ОШИБОК{% else %}Динамика{% endif %} по продукту день за днём</h2>
     <p style="color:#888;font-size:0.85rem;margin-bottom:12px;">
-      Выберите продукт из списка — увидите динамику ошибок (столбцы) и отношение Ошибка/Успех % (пунктирная линия).
+      {% if is_status_screen %}Выберите продукт — динамика ошибок (столбцы) и Ошибка/Успех % (пунктирная линия).{% else %}Выберите продукт — динамика ошибок по блокам и каналам.{% endif %}
     </p>
     {{ charts.product_drill }}
     {% if pd_data.products %}

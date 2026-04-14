@@ -182,7 +182,7 @@ def upload():
             slug = str(metric_id)
             report_filename = f"report_{upload_id}_{slug}.html"
             report_path = REPORT_DIR / report_filename
-            generate_report(df_m, summary, results, str(report_path))
+            generate_report(df_m, summary, results, str(report_path), metric_id=metric_id)
 
             total_anomalies += len(results.get("anomalies", []))
             total_wow += len(results.get("wow", []))
