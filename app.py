@@ -146,6 +146,37 @@ def upload():
                 # lvl4_matrix still needed for use_lvl4 detection; build with large top_n
                 pd_full = detect_product_dynamics(df_m, top_n=200)
                 pd_error["lvl4_matrix"] = pd_full["lvl4_matrix"]
+
+                # Compute error/success ratio and trend per product
+                import datetime as _dta
+                err_suc_lookup = {}
+                for _pm in pd_error.get("products", []):
+                    _p = _pm["name"]
+                    _em = pd_error.get("matrix", {}).get(_p, {})
+                    _sm = pd_error.get("success_matrix", {}).get(_p, {})
+                    # Overall ratio (%)
+                    _te = sum(_em.values())
+                    _ts = sum(_sm.values())
+                    _ratio = round(_te / _ts * 100, 1) if _ts > 0 else None
+                    _pm["err_suc_ratio"] = _ratio
+                    # Trend: compare last 7 non-Sunday days ratio vs prev 7
+                    _dns = sorted([d for d in _em if _dta.date.fromisoformat(d).weekday() != 6])
+                    _tpct, _tdir = None, "stable"
+                    if len(_dns) >= 4:
+                        _h = min(7, len(_dns) // 2)
+                        _cd = _dns[-_h:]; _pd_ = _dns[-2*_h:-_h]
+                        _ce = sum(_em.get(d,0) for d in _cd); _cs = sum(_sm.get(d,0) for d in _cd)
+                        _pe = sum(_em.get(d,0) for d in _pd_); _ps = sum(_sm.get(d,0) for d in _pd_)
+                        _cr = _ce / _cs * 100 if _cs > 0 else None
+                        _pr = _pe / _ps * 100 if _ps > 0 else None
+                        if _cr is not None and _pr and _pr > 0:
+                            _tpct = round((_cr - _pr) / _pr * 100, 1)
+                            _tdir = "growing" if _tpct > 15 else ("declining" if _tpct < -15 else "stable")
+                    _pm["err_suc_trend_pct"] = _tpct
+                    _pm["err_suc_trend_dir"] = _tdir
+                    err_suc_lookup[_p] = {"ratio": _ratio, "trend_pct": _tpct, "trend_dir": _tdir}
+                pd_error["err_suc_lookup"] = err_suc_lookup
+
                 results["product_dynamics"] = pd_error
 
             slug = str(metric_id)
