@@ -290,11 +290,11 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             ))
             _add_trendline(fig_ch, ts["week"].tolist(), y_vals, color, ch)
         fig_ch.update_layout(
-            title="Тренд ошибок по каналам (по неделям, без воскресений)",
+            title="Тренд ошибок по каналам (среднедневные, без воскресений)",
             height=340, legend=dict(orientation="h", y=-0.22),
             margin=dict(l=40, r=20, t=50, b=90),
             plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
-            xaxis_title="Неделя", yaxis_title="Σ val",
+            xaxis_title="Неделя", yaxis_title="Среднедневной val",
         )
         charts["weekly_channel"] = fig_ch.to_html(full_html=False, include_plotlyjs=False)
 
@@ -314,11 +314,11 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             ))
             _add_trendline(fig_bl, ts["week"].tolist(), y_vals, color, bt)
         fig_bl.update_layout(
-            title="Тренд ошибок по блокам (по неделям, без воскресений)",
+            title="Тренд ошибок по блокам (среднедневные, без воскресений)",
             height=340, legend=dict(orientation="h", y=-0.22),
             margin=dict(l=40, r=20, t=50, b=90),
             plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
-            xaxis_title="Неделя", yaxis_title="Σ val",
+            xaxis_title="Неделя", yaxis_title="Среднедневной val",
         )
         charts["weekly_block"] = fig_bl.to_html(full_html=False, include_plotlyjs=False)
 

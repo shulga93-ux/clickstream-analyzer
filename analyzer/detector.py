@@ -429,7 +429,7 @@ def detect_status_screen(df: pd.DataFrame) -> dict:
 
 def detect_weekly_trends(df: pd.DataFrame) -> dict:
     """Aggregate errors by ISO week (Mon-Sat, excl. Sundays) per channel and block_type.
-    Returns weekly series suitable for trend line charts.
+    Returns average daily value per week to handle incomplete weeks correctly.
     """
     df2 = df.copy()
     df2["date"] = df2["report_dt"].dt.date
@@ -439,19 +439,28 @@ def detect_weekly_trends(df: pd.DataFrame) -> dict:
 
     weeks = sorted(df2["week"].unique())
 
-    # By channel
+    # Days count per week (for averaging)
+    days_per_week = df2.groupby("week")["date"].nunique().to_dict()
+
+    # By channel — avg daily val per week
     ch_week = df2.groupby(["week", "channel_name"])["val"].sum().reset_index()
     by_channel = {}
     for ch, grp in ch_week.groupby("channel_name"):
         w_map = grp.set_index("week")["val"].to_dict()
-        by_channel[ch] = [{"week": w, "val": int(w_map.get(w, 0))} for w in weeks]
+        by_channel[ch] = [
+            {"week": w, "val": round(w_map.get(w, 0) / max(days_per_week.get(w, 1), 1), 1)}
+            for w in weeks
+        ]
 
-    # By block_type
+    # By block_type — avg daily val per week
     bl_week = df2.groupby(["week", "block_type"])["val"].sum().reset_index()
     by_block = {}
     for bt, grp in bl_week.groupby("block_type"):
         w_map = grp.set_index("week")["val"].to_dict()
-        by_block[bt] = [{"week": w, "val": int(w_map.get(w, 0))} for w in weeks]
+        by_block[bt] = [
+            {"week": w, "val": round(w_map.get(w, 0) / max(days_per_week.get(w, 1), 1), 1)}
+            for w in weeks
+        ]
 
     return {"weeks": weeks, "by_channel": by_channel, "by_block": by_block}
 
