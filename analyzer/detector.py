@@ -529,30 +529,31 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
                 wow_pct[p] = round((curr_sum - prev_sum) / prev_sum * 100, 1)
                 wow_delta[p] = curr_sum - prev_sum
 
-    # ── Per-product trend (linear regression over daily totals) ──────────────
+    # ── Per-product trend: current week avg vs previous week avg ─────────────
     dates_str = [str(d) for d in dates]
     product_trends = {}
     for p in product_names:
-        y = np.array([matrix[p].get(d, 0) for d in dates_str], dtype=float)
-        x = np.arange(len(y))
-        if len(y) >= 3 and y.mean() > 0:
-            slope, _, r2, _ = _linregress(x, y)
-            rel_slope = slope / y.mean() if y.mean() != 0 else 0
-            pct_chg = round((y[-1] - y[0]) / y[0] * 100, 1) if y[0] != 0 else 0.0
-            # If overall change is large (>30%), trust that over R² threshold
-            if abs(pct_chg) > 30:
-                direction = "growing" if pct_chg > 0 else "declining"
-            elif abs(rel_slope) < 0.02 or r2 < 0.1:
+        vals = [matrix[p].get(d, 0) for d in dates_str]
+        n = len(vals)
+        if n >= 2:
+            # Split into two halves (each up to 7 days), compare averages
+            half = min(7, n // 2) if n >= 4 else 1
+            curr_avg = np.mean(vals[-half:]) if half > 0 else 0
+            prev_avg = np.mean(vals[:half])  if half > 0 else 0
+            if prev_avg > 0:
+                pct_chg = round((curr_avg - prev_avg) / prev_avg * 100, 1)
+            else:
+                pct_chg = 0.0
+            if abs(pct_chg) < 10:
                 direction = "stable"
-            elif slope > 0:
+            elif pct_chg > 0:
                 direction = "growing"
             else:
                 direction = "declining"
         else:
             direction = "stable"
-            slope = 0.0
             pct_chg = 0.0
-        product_trends[p] = {"direction": direction, "slope": round(float(slope), 2), "pct_change": pct_chg}
+        product_trends[p] = {"direction": direction, "pct_change": pct_chg}
 
     products_meta = []
     for _, row in top_products.iterrows():
@@ -569,7 +570,6 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
             "wow_delta": wow_delta.get(p),
             "last_val": matrix[p].get(last_date, 0) if last_date else 0,
             "trend_direction": tr.get("direction", "stable"),
-            "trend_slope": tr.get("slope", 0.0),
             "trend_pct": tr.get("pct_change", 0.0),
         })
 
