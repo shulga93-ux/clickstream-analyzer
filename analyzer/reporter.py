@@ -844,44 +844,75 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {{ charts.product_drill }}
     {% if pd_data.products %}
     <div style="margin-top:16px;overflow-x:auto;">
-      <table class="stat-table">
+      <table class="stat-table" id="pd_summary_tbl">
         <thead>
           <tr>
-            <th>Продукт</th>
-            <th>Сегмент</th>
-            <th>Тип ошибки</th>
-            <th>Σ val</th>
-            <th>DoD ({{ pd_data.last_date }})</th>
-            <th>WoW (неделя к неделе)</th>
+            <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="0">Продукт <span class="si">⇅</span></th>
+            <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
+            <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Σ val <span class="si">⇅</span></th>
+            <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Тренд ошибок <span class="si">⇅</span></th>
           </tr>
         </thead>
         <tbody>
         {% for p in pd_data.products %}
-        {% set dod_v = pd_data.dod_pct.get(p.name) %}
-        {% set wow_v = pd_data.wow_pct.get(p.name) %}
+        {% set td = p.trend_direction if p.trend_direction is defined else 'stable' %}
+        {% set tp = p.trend_pct if p.trend_pct is defined else 0 %}
+        {% set trend_icon  = '📈' if td == 'growing' else ('📉' if td == 'declining' else '→') %}
+        {% set trend_color = '#e74c3c' if td == 'growing' else ('#27ae60' if td == 'declining' else '#888') %}
+        {% set trend_label = 'Растёт' if td == 'growing' else ('Падает' if td == 'declining' else 'Стабильно') %}
         <tr>
-          <td><strong>{{ p.name }}</strong></td>
-          <td>{{ p.segment }}</td>
-          <td style="color:#888;font-size:0.82rem;">{{ p.metric_name }}</td>
-          <td>{{ "{:,}".format(p.total_val) }}</td>
-          <td>
-            {% if dod_v is not none %}
-              <span style="color:{{ '#e74c3c' if dod_v > 0 else '#27ae60' }};font-weight:600;">
-                {{ '+' if dod_v > 0 else '' }}{{ dod_v }}%
-              </span>
-            {% else %}<span style="color:#bbb">—</span>{% endif %}
-          </td>
-          <td>
-            {% if wow_v is not none %}
-              <span style="color:{{ '#e74c3c' if wow_v > 0 else '#27ae60' }};font-weight:600;">
-                {{ '+' if wow_v > 0 else '' }}{{ wow_v }}%
-              </span>
-            {% else %}<span style="color:#bbb">—</span>{% endif %}
+          <td data-val="{{ p.name }}"><strong>{{ p.name }}</strong></td>
+          <td data-val="{{ p.segment }}">{{ p.segment }}</td>
+          <td data-val="{{ p.total_val }}" style="text-align:right;">{{ "{:,}".format(p.total_val) }}</td>
+          <td data-val="{{ tp }}" style="text-align:center;">
+            <span style="color:{{ trend_color }};font-weight:600;white-space:nowrap;">
+              {{ trend_icon }} {{ trend_label }}
+              {% if tp != 0 %}<span style="font-size:0.8rem;margin-left:4px;">({{ '+' if tp > 0 else '' }}{{ tp }}%)</span>{% endif %}
+            </span>
           </td>
         </tr>
         {% endfor %}
         </tbody>
       </table>
+      <script>
+      (function() {
+        var TID = "pd_summary_tbl";
+        var sortState = { col: null, dir: null };
+        function updateIcons(tbl, activeCol, dir) {
+          tbl.querySelectorAll("thead th[data-col] .si").forEach(function(span) {
+            var col = parseInt(span.parentNode.getAttribute("data-col"));
+            span.textContent = col === activeCol ? (dir === "desc" ? " ▼" : " ▲") : " ⇅";
+            span.style.color = col === activeCol ? "#4f8ef7" : "#bbb";
+          });
+        }
+        function sortTable(tbl, col, dir) {
+          var tbody = tbl.querySelector("tbody");
+          var rows = Array.from(tbody.querySelectorAll("tr"));
+          rows.sort(function(a, b) {
+            var av = a.cells[col] ? (a.cells[col].getAttribute("data-val") || "") : "";
+            var bv = b.cells[col] ? (b.cells[col].getAttribute("data-val") || "") : "";
+            var an = parseFloat(av), bn = parseFloat(bv);
+            var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru");
+            return dir === "desc" ? -cmp : cmp;
+          });
+          rows.forEach(function(r) { tbody.appendChild(r); });
+          sortState.col = col; sortState.dir = dir;
+          updateIcons(tbl, col, dir);
+        }
+        document.addEventListener("DOMContentLoaded", function() {
+          var tbl = document.getElementById(TID);
+          if (!tbl) return;
+          tbl.querySelectorAll("thead th[data-col]").forEach(function(th) {
+            th.addEventListener("click", function() {
+              var col = parseInt(th.getAttribute("data-col"));
+              var dir = (sortState.col === col && sortState.dir === "asc") ? "desc" : "asc";
+              sortTable(tbl, col, dir);
+            });
+          });
+          sortTable(tbl, 2, "desc");
+        });
+      })();
+      </script>
     </div>
     {% endif %}
   </div>
