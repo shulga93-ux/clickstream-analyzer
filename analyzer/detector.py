@@ -538,13 +538,16 @@ def detect_product_dynamics(df: pd.DataFrame, top_n: int = 40) -> dict:
         if len(y) >= 3 and y.mean() > 0:
             slope, _, r2, _ = _linregress(x, y)
             rel_slope = slope / y.mean() if y.mean() != 0 else 0
-            if abs(rel_slope) < 0.02 or r2 < 0.1:
+            pct_chg = round((y[-1] - y[0]) / y[0] * 100, 1) if y[0] != 0 else 0.0
+            # If overall change is large (>30%), trust that over R² threshold
+            if abs(pct_chg) > 30:
+                direction = "growing" if pct_chg > 0 else "declining"
+            elif abs(rel_slope) < 0.02 or r2 < 0.1:
                 direction = "stable"
             elif slope > 0:
                 direction = "growing"
             else:
                 direction = "declining"
-            pct_chg = round((y[-1] - y[0]) / y[0] * 100, 1) if y[0] != 0 else 0.0
         else:
             direction = "stable"
             slope = 0.0

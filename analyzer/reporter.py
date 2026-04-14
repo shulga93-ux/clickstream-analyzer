@@ -867,7 +867,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <td data-val="{{ tp }}" style="text-align:center;">
             <span style="color:{{ trend_color }};font-weight:600;white-space:nowrap;">
               {{ trend_icon }} {{ trend_label }}
-              {% if tp != 0 %}<span style="font-size:0.8rem;margin-left:4px;">({{ '+' if tp > 0 else '' }}{{ tp }}%)</span>{% endif %}
+              {% if td != 'stable' and tp != 0 %}<span style="font-size:0.8rem;margin-left:4px;">({{ '+' if tp > 0 else '' }}{{ tp }}%)</span>{% endif %}
             </span>
           </td>
         </tr>
