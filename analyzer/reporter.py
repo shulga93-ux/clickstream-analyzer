@@ -678,11 +678,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <div class="kpi-card">
-      <div class="value" style="color: #f39c12;">{{ wow | length }}</div>
-      <div class="label">WoW отклонений</div>
+      <div class="value" style="color: #f39c12;">{{ wow_grouped | length }}</div>
+      <div class="label">WoW продуктов</div>
     </div>
     <div class="kpi-card">
-      <div class="value" style="color: #e67e22;">{{ dod | length }}</div>
+      <div class="value" style="color: #e67e22;">{{ dod_grouped | length }}</div>
       <div class="label">DoD отклонений</div>
     </div>
   </div>
