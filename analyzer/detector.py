@@ -118,9 +118,11 @@ def detect_value_anomalies(df: pd.DataFrame) -> list:
 # ─── 2. Trends: linear regression per metric_name ────────────────────────────
 
 def detect_trends(df: pd.DataFrame) -> dict:
-    """Compute daily totals per metric_name and fit a linear trend."""
+    """Compute daily totals per metric_name and fit a linear trend (Sundays excluded)."""
     df2 = df.copy()
     df2["date"] = df2["report_dt"].dt.date
+    # Exclude Sundays — near-zero load distorts regression and timeseries
+    df2 = df2[df2["date"].apply(lambda d: d.weekday() != 6)]
     daily = df2.groupby(["date", "metric_name"])["val"].sum().reset_index()
 
     trends = {}
@@ -141,15 +143,21 @@ def detect_trends(df: pd.DataFrame) -> dict:
 
         slope, intercept, r2, p_value = _linregress(x, y)
 
-        rel_slope = slope / y.mean() if y.mean() != 0 else 0
-        if abs(rel_slope) < 0.02 or r2 < 0.1:
+        # Primary direction: compare weekly averages (last 7 points vs first 7)
+        half = min(7, len(y) // 2) if len(y) >= 4 else 1
+        curr_avg = y[-half:].mean() if half > 0 else y.mean()
+        prev_avg = y[:half].mean()  if half > 0 else y.mean()
+        if prev_avg > 0:
+            pct_total = round((curr_avg - prev_avg) / prev_avg * 100, 1)
+        else:
+            pct_total = round((y[-1] - y[0]) / y[0] * 100, 1) if y[0] != 0 else 0
+
+        if abs(pct_total) < 15:
             direction = "stable"
-        elif slope > 0:
+        elif pct_total > 0:
             direction = "growing"
         else:
             direction = "declining"
-
-        pct_total = round((y[-1] - y[0]) / y[0] * 100, 1) if y[0] != 0 else 0
 
         trends[metric] = {
             "direction": direction,
