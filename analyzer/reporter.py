@@ -91,6 +91,55 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
             )
             charts["timeline"] = fig.to_html(full_html=False, include_plotlyjs=False)
 
+    # 1b. Error/Success ratio chart (55558: Ошибка / Успех per day, excl Sundays)
+    if "lvl_4" in df.columns:
+        df_ss = df[df["metric_id"].astype(str) == "55558"].copy()
+        df_ss["date"] = df_ss["report_dt"].dt.date.astype(str)
+        df_ss = df_ss[df_ss["report_dt"].dt.weekday != 6]  # excl Sundays
+        if not df_ss.empty:
+            daily_type = df_ss.groupby(["date", "lvl_4"])["val"].sum().reset_index()
+            all_dates_ss = sorted(daily_type["date"].unique())
+            err_map = daily_type[daily_type["lvl_4"] == "Ошибка"].set_index("date")["val"].to_dict()
+            suc_map = daily_type[daily_type["lvl_4"] == "Успех"].set_index("date")["val"].to_dict()
+            ratios, dates_ratio, err_vals, suc_vals = [], [], [], []
+            for d in all_dates_ss:
+                e = err_map.get(d, 0)
+                s = suc_map.get(d, 0)
+                if s > 0:
+                    ratios.append(round(e / s * 100, 2))
+                    dates_ratio.append(d)
+                    err_vals.append(e)
+                    suc_vals.append(s)
+            if ratios:
+                fig_r = go.Figure()
+                fig_r.add_trace(go.Bar(
+                    x=dates_ratio, y=err_vals, name="Ошибка",
+                    marker_color="#e74c3c", opacity=0.5, yaxis="y2",
+                ))
+                fig_r.add_trace(go.Bar(
+                    x=dates_ratio, y=suc_vals, name="Успех",
+                    marker_color="#27ae60", opacity=0.5, yaxis="y2",
+                ))
+                fig_r.add_trace(go.Scatter(
+                    x=dates_ratio, y=ratios, name="Ошибка / Успех (%)",
+                    mode="lines+markers",
+                    line=dict(color="#c0392b", width=2.5),
+                    marker=dict(size=6),
+                    yaxis="y",
+                ))
+                fig_r.update_layout(
+                    barmode="group",
+                    title="Статусный экран: отношение Ошибка / Успех по дням (%, без воскресений)",
+                    height=400,
+                    legend=dict(orientation="h", y=-0.2),
+                    margin=dict(l=50, r=60, t=55, b=80),
+                    plot_bgcolor="#fafafa", paper_bgcolor="#ffffff",
+                    xaxis_title="Дата",
+                    yaxis=dict(title="Ошибка / Успех (%)", side="left", color="#c0392b"),
+                    yaxis2=dict(title="Кол-во событий", overlaying="y", side="right", showgrid=False),
+                )
+                charts["error_ratio"] = fig_r.to_html(full_html=False, include_plotlyjs=False)
+
     def _group_by_product(items):
         """Aggregate deviations by (segment, lvl_2): sum val_curr/val_prev, recalc delta/pct."""
         from collections import defaultdict
@@ -919,6 +968,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <div class="empty-state">✅ WoW отклонений нет (нет данных за предыдущие 7 дней или ниже порога)</div>
     {% endif %}
   </div>
+
+  <!-- Error/Success ratio chart -->
+  {% if charts.error_ratio %}
+  <div class="section">
+    <h2>📉 Статусный экран — динамика отношения Ошибка / Успех</h2>
+    {{ charts.error_ratio }}
+  </div>
+  {% endif %}
 
   <!-- DoD section (full width) -->
   <div class="section">
