@@ -498,29 +498,14 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
                         "x": dates_pd, "y": ratio_vals,
                         "name": "Ошибка/Успех (%)", "type": "scatter",
                         "mode": "lines+markers",
-                        "line": {"color": "#c0392b", "width": 2, "dash": "dot"},
+                        "line": {"color": "#1a3a6b", "width": 2, "dash": "dot"},
                         "marker": {"size": 5},
                         "legendgroup": "ratio",
                         "showlegend": True,
                         "yaxis": "y2",
                     })
 
-            # Channel lines (secondary axis)
-            for ch in channel_names:
-                chdata = channel_matrix.get(p, {}).get(ch, {})
-                y_vals = [chdata.get(d, 0) for d in dates_pd]
-                if sum(y_vals) == 0:
-                    continue
-                product_traces.append({
-                    "x": dates_pd, "y": y_vals,
-                    "name": ch, "type": "scatter",
-                    "mode": "lines+markers",
-                    "line": {"color": CHANNEL_COLORS.get(ch, "#888"), "width": 2, "dash": "dot"},
-                    "marker": {"size": 5},
-                    "legendgroup": ch,
-                    "showlegend": True,
-                    "yaxis": "y2",
-                })
+            # Channel lines removed — only Ошибка bars + ratio line shown
 
             traces_per_product.append(product_traces)
 
@@ -603,9 +588,9 @@ def _build_charts(df: pd.DataFrame, results: dict) -> dict:
         # Build select options
         select_opts = ""
         for pm in products_meta:
-            dod_str = f"DoD {pm['dod_pct']:+.1f}%" if pm.get("dod_pct") is not None else "DoD —"
-            wow_str = f"WoW {pm['wow_pct']:+.1f}%" if pm.get("wow_pct") is not None else "WoW —"
-            select_opts += f'<option value="{pm["name"]}">{pm["name"]}  [{dod_str} / {wow_str}]</option>\n'
+            wow_pct = pm.get("wow_pct")
+            wow_str = f"WoW {wow_pct:+.1f}% ср/день" if wow_pct is not None else "WoW —"
+            select_opts += f'<option value="{pm["name"]}">{pm["name"]}  [{wow_str}]</option>\n'
 
         drill_uid = "drill_" + str(abs(hash(str(products_meta[0]))))[:8]
 
