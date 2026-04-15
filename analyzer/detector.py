@@ -186,7 +186,8 @@ def detect_trends(df: pd.DataFrame) -> dict:
 
 def detect_dod(df: pd.DataFrame) -> list:
     """Compare each weekday vs same weekday -7 days across last 7 working days.
-    Excludes Sundays (weekday == 6) and Mondays (weekday == 0, unreliable base after Sunday gap).
+    Excludes Sundays (weekday == 6).
+    Skips comparisons where base day (d_prev) has unreliable volume (< 20% of avg daily vol).
     Threshold: |pct| > 50 and |delta| > 5.
     Returns all deviations sorted by |delta| desc (reporter limits to top 50).
     """
@@ -205,16 +206,25 @@ def detect_dod(df: pd.DataFrame) -> list:
     available_cols = [c for c in _GROUP_COLS if c in df2.columns]
     grp_cols = available_cols
 
-    # Take only last 7 non-Sunday, non-Monday dates
-    # Monday excluded: it follows Sunday (excluded day) so comparison base is unreliable
-    valid_dates = [d for d in dates if d.weekday() not in (0, 6)]
-    recent_dates = valid_dates[-7:] if len(valid_dates) >= 7 else valid_dates
+    # Take only last 7 non-Sunday dates
+    non_sunday_dates = [d for d in dates if d.weekday() != 6]
+    recent_dates = non_sunday_dates[-7:] if len(non_sunday_dates) >= 7 else non_sunday_dates
+
+    # Compute average daily total volume (excl. Sundays) — used to detect unreliable base
+    daily_totals = df2[df2["date"].apply(lambda d: d.weekday() != 6)].groupby("date")["val"].sum()
+    avg_daily_vol = float(daily_totals.mean()) if len(daily_totals) > 0 else 0
+    min_base_vol = avg_daily_vol * 0.20  # base day with < 20% of avg is considered unreliable
 
     all_deviations = []
 
     for d_curr in recent_dates:
         d_prev = d_curr - _dt.timedelta(days=7)
         if d_prev not in dates_set:
+            continue
+
+        # Skip if base day volume is unreliable (holiday, gap, or Sunday-adjacent effect)
+        prev_total = float(daily_totals.get(d_prev, 0))
+        if prev_total < min_base_vol:
             continue
 
         curr_df = df2[df2["date"] == d_curr].groupby(grp_cols)["val"].sum().reset_index().rename(columns={"val": "val_curr"})
