@@ -1,4 +1,5 @@
 import os
+import shutil
 import uuid
 from pathlib import Path
 from functools import wraps
@@ -93,6 +94,22 @@ def upload():
 
     if not allowed_file(file.filename):
         return jsonify({"error": "Unsupported format. Use: CSV, XLSX"}), 400
+
+    # Check free disk space (need at least 50 MB)
+    disk = shutil.disk_usage(REPORT_DIR)
+    if disk.free < 50 * 1024 * 1024:
+        free_mb = disk.free // (1024 * 1024)
+        return jsonify({"error": f"Недостаточно места на диске: свободно {free_mb} МБ, нужно минимум 50 МБ. Удалите старые файлы."}), 507
+
+    # Cleanup old reports — keep only last 5 report sets (each set = 4 files: svod+55556+55557+55558)
+    all_reports = sorted(REPORT_DIR.glob("*.html"), key=lambda p: p.stat().st_mtime)
+    KEEP_REPORTS = 20  # keep last 20 files (~5 full sets of 4 reports each)
+    if len(all_reports) > KEEP_REPORTS:
+        for old in all_reports[:len(all_reports) - KEEP_REPORTS]:
+            try:
+                old.unlink()
+            except Exception:
+                pass
 
     suffix = Path(file.filename).suffix.lower()
     upload_id = str(uuid.uuid4())[:8]
