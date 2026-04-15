@@ -17,7 +17,7 @@ if _env_path.exists():
 from analyzer.parser import parse_file, get_summary
 from analyzer.detector import detect_all
 from analyzer.reporter import generate_report
-from analyzer.candidates import generate_candidates_report
+
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
@@ -206,23 +206,6 @@ def upload():
 
         if not reports:
             return jsonify({"error": "Нет данных ни по одной метрике"}), 422
-
-        # Generate "Кандидаты в Проблемы" report (across all metrics)
-        candidates_filename = f"report_{upload_id}_candidates.html"
-        candidates_path = REPORT_DIR / candidates_filename
-        generate_candidates_report(df_full, str(candidates_path))
-        reports.append({
-            "metric_id": "candidates",
-            "label": "Кандидаты в Проблемы",
-            "report_url": f"/reports/{candidates_filename}",
-            "total_records": len(df_full),
-            "total_val": int(df_full["val"].sum()),
-            "unique_products": int(df_full["lvl_2"].nunique()),
-            "date_range": {},
-            "anomalies_found": 0,
-            "wow_deviations": 0,
-            "dod_deviations": 0,
-        })
 
         # Generate СВОД report
         from analyzer.reporter import generate_svod_report
