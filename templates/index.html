@@ -5,35 +5,50 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>СБОЛ.про — Анализ ошибок</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
          background: #f0f2f5; min-height: 100vh; display: flex; flex-direction: column;
          align-items: center; justify-content: center; padding: 24px; }
   .card { background: white; border-radius: 16px; padding: 40px;
-          box-shadow: 0 8px 32px rgba(0,0,0,0.12); width: 100%; max-width: 540px; }
+          box-shadow: 0 8px 32px rgba(0,0,0,0.12); width: 100%; max-width: 560px; }
   .logo { text-align: center; margin-bottom: 32px; }
   .logo h1 { font-size: 1.7rem; font-weight: 700; color: #1a1a2e; }
   .logo p { color: #888; margin-top: 8px; }
-  .drop-zone { border: 2px dashed #d0d7de; border-radius: 12px; padding: 40px 24px;
+
+  /* Drop zone */
+  .drop-zone { border: 2px dashed #d0d7de; border-radius: 12px; padding: 36px 24px;
                text-align: center; cursor: pointer; transition: all 0.2s;
                background: #fafbfc; position: relative; }
   .drop-zone:hover, .drop-zone.dragover { border-color: #4f8ef7; background: #f0f6ff; }
+  .drop-zone.has-file { border-color: #27ae60; background: #f0faf4; border-style: solid; }
+  .drop-zone.analyzing { border-color: #4f8ef7; background: #f0f6ff; border-style: solid; pointer-events: none; }
   .drop-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
-  .drop-zone .icon { font-size: 3rem; margin-bottom: 12px; }
-  .drop-zone .hint { color: #888; font-size: 0.9rem; margin-top: 8px; }
-  .selected-file { margin-top: 12px; padding: 10px 14px; background: #f0f6ff;
-                   border-radius: 8px; font-size: 0.9rem; color: #4f8ef7; display: none; }
-  .btn { display: block; width: 100%; padding: 14px; background: #4f8ef7; color: white;
-         border: none; border-radius: 10px; font-size: 1rem; font-weight: 600;
-         cursor: pointer; margin-top: 20px; transition: background 0.2s; }
-  .btn:hover { background: #3a7de0; }
-  .btn:disabled { background: #b0c4e8; cursor: not-allowed; }
-  .progress { display: none; margin-top: 16px; }
-  .progress-bar { height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden; }
-  .progress-fill { height: 100%; width: 0; background: #4f8ef7;
-                   border-radius: 3px; transition: width 0.3s; animation: pulse 1.5s infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
-  .progress-text { text-align: center; font-size: 0.85rem; color: #888; margin-top: 8px; }
+  .drop-zone .icon { font-size: 2.8rem; margin-bottom: 10px; transition: all 0.3s; }
+  .drop-zone .hint { color: #888; font-size: 0.88rem; margin-top: 6px; }
+  .file-name { font-weight: 600; color: #1a1a2e; font-size: 0.95rem; margin-top: 4px; }
+
+  /* Progress */
+  .progress-wrap { display: none; margin-top: 20px; }
+  .progress-header { display: flex; justify-content: space-between; align-items: center;
+                     margin-bottom: 8px; }
+  .progress-stage { font-size: 0.88rem; font-weight: 600; color: #444; }
+  .progress-pct { font-size: 0.88rem; color: #4f8ef7; font-weight: 700; }
+  .progress-bar { height: 8px; background: #e8ecf0; border-radius: 4px; overflow: hidden; }
+  .progress-fill { height: 100%; width: 0; background: linear-gradient(90deg, #4f8ef7, #27ae60);
+                   border-radius: 4px; transition: width 0.6s ease; }
+  .stages-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+  .stage-item { display: flex; align-items: center; gap: 10px; font-size: 0.82rem; color: #bbb;
+                transition: color 0.3s; }
+  .stage-item.active { color: #4f8ef7; font-weight: 600; }
+  .stage-item.done { color: #27ae60; }
+  .stage-dot { width: 8px; height: 8px; border-radius: 50%; background: #e0e0e0;
+               flex-shrink: 0; transition: background 0.3s; }
+  .stage-item.active .stage-dot { background: #4f8ef7;
+    box-shadow: 0 0 0 3px rgba(79,142,247,0.2); animation: dotpulse 1s infinite; }
+  .stage-item.done .stage-dot { background: #27ae60; }
+  @keyframes dotpulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.3); } }
+
+  /* Result */
   .result { display: none; margin-top: 20px; padding: 20px; border-radius: 12px; }
   .result.success { background: #f0faf4; border: 1px solid #82e0aa; }
   .result.error { background: #fff5f5; border: 1px solid #f5b7b1; }
@@ -44,18 +59,23 @@
   .stat-item { background: white; padding: 10px; border-radius: 8px; text-align: center; }
   .stat-item .num { font-size: 1.4rem; font-weight: 700; color: #4f8ef7; }
   .stat-item .lbl { font-size: 0.75rem; color: #888; }
-  .open-btn { display: block; text-align: center; padding: 12px; background: #1e8449;
-              color: white; text-decoration: none; border-radius: 8px; font-weight: 600; }
   .reports-list { display: flex; flex-direction: column; gap: 10px; }
   .report-btn { display: flex; align-items: center; gap: 12px; padding: 14px 16px;
                 background: #f8f9fa; border: 1.5px solid #e0e0e0; border-radius: 10px;
                 text-decoration: none; color: #1a1a2e; transition: all 0.15s; }
   .report-btn:hover { background: #f0f6ff; border-color: #4f8ef7; }
+  .report-btn.svod { background: #fff8e1; border-color: #f0c040; }
+  .report-btn.svod:hover { background: #fff3cd; border-color: #e0a800; }
   .report-icon { font-size: 1.6rem; flex-shrink: 0; }
   .report-info { flex: 1; }
   .report-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 3px; }
   .report-stats { font-size: 0.78rem; color: #888; display: flex; gap: 4px; }
   .report-arrow { color: #4f8ef7; font-size: 1.1rem; font-weight: 700; }
+  .again-btn { display: block; width: 100%; padding: 11px; background: #f4f6f9; color: #555;
+               border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 0.9rem;
+               font-weight: 600; cursor: pointer; margin-top: 14px; text-align: center;
+               transition: all 0.2s; text-decoration: none; }
+  .again-btn:hover { background: #eef0f3; border-color: #ccc; }
   .formats { margin-top: 28px; border-top: 1px solid #f0f2f5; padding-top: 20px; }
   .formats h4 { font-size: 0.85rem; color: #888; margin-bottom: 10px; text-transform: uppercase; }
   .format-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.8rem; }
@@ -75,27 +95,30 @@
 <div class="card">
   <div class="logo">
     <h1>📊 СБОЛ.про — Анализ ошибок</h1>
-    <p>Загрузите данные — получите отчёт с WoW/DoD аномалиями и трендами</p>
+    <p>Загрузите файл — анализ запустится автоматически</p>
   </div>
 
   <div class="drop-zone" id="dropZone">
     <input type="file" id="fileInput" accept=".csv,.xlsx">
-    <div class="icon">📂</div>
-    <div><strong>Перетащите файл</strong> или нажмите для выбора</div>
-    <div class="hint">CSV, XLSX · до 50 МБ</div>
+    <div class="icon" id="dropIcon">📂</div>
+    <div id="dropText"><strong>Перетащите файл</strong> или нажмите для выбора</div>
+    <div class="file-name" id="fileName" style="display:none;"></div>
+    <div class="hint" id="dropHint">CSV, XLSX · до 50 МБ</div>
   </div>
-  <div class="selected-file" id="selectedFile"></div>
 
-  <button class="btn" id="analyzeBtn" disabled onclick="analyze()">Анализировать</button>
-
-  <div class="progress" id="progress">
+  <!-- Progress -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-header">
+      <span class="progress-stage" id="progressStage">Подготовка...</span>
+      <span class="progress-pct" id="progressPct">0%</span>
+    </div>
     <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-    <div class="progress-text" id="progressText">Обрабатываем данные...</div>
+    <div class="stages-list" id="stagesList"></div>
   </div>
 
   <div class="result" id="result"></div>
 
-  <div class="formats">
+  <div class="formats" id="formatsBlock">
     <h4>Ожидаемые колонки</h4>
     <div class="format-cols">
       <div class="format-item"><code>metric_id</code> — 55556/55557/55558</div>
@@ -117,16 +140,45 @@
 </div>
 
 <script>
-  const dropZone = document.getElementById("dropZone");
-  const fileInput = document.getElementById("fileInput");
-  const analyzeBtn = document.getElementById("analyzeBtn");
-  const selectedFile = document.getElementById("selectedFile");
-  let selectedFileObj = null;
+  const STAGES = [
+    { label: "Загрузка файла",           pct: 8  },
+    { label: "Разбор данных",            pct: 18 },
+    { label: "Анализ WoW / DoD",         pct: 35 },
+    { label: "Анализ трендов",           pct: 52 },
+    { label: "Анализ продуктов",         pct: 68 },
+    { label: "Генерация отчётов",        pct: 82 },
+    { label: "Формирование СВОД",        pct: 93 },
+    { label: "Готово",                   pct: 100 },
+  ];
+
+  const dropZone    = document.getElementById("dropZone");
+  const fileInput   = document.getElementById("fileInput");
+  const dropIcon    = document.getElementById("dropIcon");
+  const dropText    = document.getElementById("dropText");
+  const fileName    = document.getElementById("fileName");
+  const dropHint    = document.getElementById("dropHint");
+  const progressWrap= document.getElementById("progressWrap");
+  const progressFill= document.getElementById("progressFill");
+  const progressStage= document.getElementById("progressStage");
+  const progressPct = document.getElementById("progressPct");
+  const stagesList  = document.getElementById("stagesList");
+  const resultEl    = document.getElementById("result");
+
+  let stageTimer = null;
+  let currentStageIdx = 0;
+
+  // Build stage items
+  STAGES.forEach((s, i) => {
+    const el = document.createElement("div");
+    el.className = "stage-item";
+    el.id = "stage_" + i;
+    el.innerHTML = `<div class="stage-dot"></div><span>${s.label}</span>`;
+    stagesList.appendChild(el);
+  });
 
   fileInput.addEventListener("change", () => {
     if (fileInput.files[0]) selectFile(fileInput.files[0]);
   });
-
   dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
   dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
   dropZone.addEventListener("drop", e => {
@@ -135,84 +187,152 @@
   });
 
   function selectFile(file) {
-    selectedFileObj = file;
-    const size = file.size > 1024*1024 ? `${(file.size/1024/1024).toFixed(1)} МБ` : `${(file.size/1024).toFixed(0)} КБ`;
-    selectedFile.style.display = "block";
-    selectedFile.textContent = `📄 ${file.name} (${size})`;
-    analyzeBtn.disabled = false;
+    const size = file.size > 1024*1024
+      ? `${(file.size/1024/1024).toFixed(1)} МБ`
+      : `${(file.size/1024).toFixed(0)} КБ`;
+    dropIcon.textContent = "📄";
+    dropText.style.display = "none";
+    fileName.style.display = "block";
+    fileName.textContent = `${file.name}  (${size})`;
+    dropHint.textContent = "Анализ запускается...";
+    dropZone.classList.add("has-file");
+    setTimeout(() => analyze(file), 300);
   }
 
-  async function analyze() {
-    if (!selectedFileObj) return;
-    analyzeBtn.disabled = true;
-    document.getElementById("progress").style.display = "block";
-    document.getElementById("result").style.display = "none";
+  function setStage(idx) {
+    currentStageIdx = idx;
+    const s = STAGES[idx];
+    progressStage.textContent = s.label;
+    progressPct.textContent = s.pct + "%";
+    progressFill.style.width = s.pct + "%";
+    document.querySelectorAll(".stage-item").forEach((el, i) => {
+      el.className = "stage-item" + (i < idx ? " done" : i === idx ? " active" : "");
+    });
+  }
 
-    const fill = document.getElementById("progressFill");
-    const text = document.getElementById("progressText");
-    fill.style.width = "30%"; text.textContent = "Загружаем файл...";
+  function advanceStages(untilIdx, intervalMs, onDone) {
+    let i = currentStageIdx + 1;
+    function step() {
+      if (i <= untilIdx) {
+        setStage(i++);
+        stageTimer = setTimeout(step, intervalMs + Math.random() * 300);
+      } else if (onDone) {
+        onDone();
+      }
+    }
+    step();
+  }
+
+  async function analyze(file) {
+    dropZone.classList.remove("has-file");
+    dropZone.classList.add("analyzing");
+    resultEl.style.display = "none";
+    progressWrap.style.display = "block";
+    document.getElementById("formatsBlock").style.display = "none";
+    currentStageIdx = -1;
+
+    setStage(0); // Загрузка файла
 
     const formData = new FormData();
-    formData.append("file", selectedFileObj);
+    formData.append("file", file);
 
+    // Animate stages 1–6 while waiting for response
+    // Each stage ~2.5s on average, but we cap at stage 6 (93%) until response arrives
+    let responseData = null;
+    let responseOk = false;
+    let fetchDone = false;
+
+    advanceStages(6, 2200, null);
+
+    // Kick off fetch
     try {
-      fill.style.width = "60%"; text.textContent = "Анализируем данные...";
       const resp = await fetch("/upload", { method: "POST", body: formData });
-      fill.style.width = "90%"; text.textContent = "Генерируем отчёт...";
-      const data = await resp.json();
-      fill.style.width = "100%";
-      setTimeout(() => showResult(data, resp.ok), 300);
+      responseData = await resp.json();
+      responseOk = resp.ok;
     } catch(e) {
-      showResult({ error: "Ошибка соединения: " + e.message }, false);
+      responseData = { error: "Ошибка соединения: " + e.message };
+      responseOk = false;
+    }
+
+    // Wait until at least stage 6 is shown, then finish
+    clearTimeout(stageTimer);
+    function finish() {
+      setStage(7);
+      setTimeout(() => showResult(responseData, responseOk), 500);
+    }
+    if (currentStageIdx >= 6) {
+      finish();
+    } else {
+      advanceStages(6, 300, finish);
     }
   }
 
+  function resetDropZone() {
+    dropZone.classList.remove("analyzing", "has-file");
+    dropIcon.textContent = "📂";
+    dropText.style.display = "block";
+    fileName.style.display = "none";
+    dropHint.textContent = "CSV, XLSX · до 50 МБ";
+    progressWrap.style.display = "none";
+    document.getElementById("formatsBlock").style.display = "block";
+    document.querySelectorAll(".stage-item").forEach(el => el.className = "stage-item");
+    progressFill.style.width = "0%";
+    fileInput.value = "";
+  }
+
   function showResult(data, ok) {
-    document.getElementById("progress").style.display = "none";
-    const el = document.getElementById("result");
-    el.style.display = "block";
-    analyzeBtn.disabled = false;
+    progressWrap.style.display = "none";
+    resultEl.style.display = "block";
+    dropZone.classList.remove("analyzing");
 
     if (ok && data.reports && data.reports.length > 0) {
       const s = data.summary;
       const dr = s.date_range ? `${s.date_range.start} → ${s.date_range.end}` : "—";
-      el.className = "result success";
+      resultEl.className = "result success";
 
       const reportBtns = data.reports.map(r => {
-        const icons = {55556: "⚠️", 55557: "🔴", 55558: "🖥️", "candidates": "🚨"};
+        const icons = {"55556": "⚠️", "55557": "🔴", "55558": "🖥️", "candidates": "🚨", "svod": "📋"};
         const icon = icons[r.metric_id] || "📊";
-        const dod = r.dod_deviations > 0 ? `<span style="color:#e67e22">DoD: ${r.dod_deviations}</span>` : `<span style="color:#27ae60">DoD: 0</span>`;
-        const wow = r.wow_deviations > 0 ? `<span style="color:#f39c12">WoW: ${r.wow_deviations}</span>` : `<span style="color:#27ae60">WoW: 0</span>`;
+        const isSvod = r.metric_id === "svod";
+        const dod = r.dod_deviations > 0
+          ? `<span style="color:#e67e22">DoD: ${r.dod_deviations}</span>`
+          : `<span style="color:#27ae60">DoD: 0</span>`;
+        const wow = r.wow_deviations > 0
+          ? `<span style="color:#f39c12">WoW: ${r.wow_deviations}</span>`
+          : `<span style="color:#27ae60">WoW: 0</span>`;
+        const statsLine = isSvod
+          ? `<span style="color:#e67e22;font-weight:600;">${r.unique_products} продуктов с отклонениями</span>`
+          : `${dod} &nbsp;·&nbsp; ${wow} &nbsp;·&nbsp; ${(r.total_val||0).toLocaleString()} событий`;
         return `
-          <a class="report-btn" href="${r.report_url}" target="_blank">
+          <a class="report-btn${isSvod ? ' svod' : ''}" href="${r.report_url}" target="_blank">
             <div class="report-icon">${icon}</div>
             <div class="report-info">
               <div class="report-name">${r.label}</div>
-              <div class="report-stats">${dod} &nbsp;·&nbsp; ${wow} &nbsp;·&nbsp; ${(r.total_val||0).toLocaleString()} событий</div>
+              <div class="report-stats">${statsLine}</div>
             </div>
             <div class="report-arrow">→</div>
           </a>`;
       }).join("");
 
-      el.innerHTML = `
+      resultEl.innerHTML = `
         <h3>✅ Анализ завершён · ${dr}</h3>
         <div class="stats-grid" style="margin:12px 0;">
           <div class="stat-item"><div class="num">${(s.total_records||0).toLocaleString()}</div><div class="lbl">Строк данных</div></div>
           <div class="stat-item"><div class="num">${(s.unique_products||0).toLocaleString()}</div><div class="lbl">Продуктов</div></div>
-          <div class="stat-item"><div class="num" style="color:#e74c3c">${s.anomalies_found||0}</div><div class="lbl">Аномалий</div></div>
           <div class="stat-item"><div class="num" style="color:#f39c12">${s.wow_deviations||0}</div><div class="lbl">WoW откл.</div></div>
+          <div class="stat-item"><div class="num" style="color:#e67e22">${s.dod_deviations||0}</div><div class="lbl">DoD откл.</div></div>
         </div>
         <div class="reports-list">${reportBtns}</div>
+        <a class="again-btn" href="#" onclick="resetDropZone();return false;">↩ Загрузить другой файл</a>
       `;
       loadRecent();
-    } else if (ok && data.report_url) {
-      // fallback single report
-      el.className = "result success";
-      el.innerHTML = `<h3>✅ Готово</h3><a class="open-btn" href="${data.report_url}" target="_blank">📊 Открыть отчёт</a>`;
-      loadRecent();
     } else {
-      el.className = "result error";
-      el.innerHTML = `<h3>❌ Ошибка</h3><p>${data.error || "Неизвестная ошибка"}</p>`;
+      resultEl.className = "result error";
+      resultEl.innerHTML = `
+        <h3>❌ Ошибка</h3>
+        <p style="margin-bottom:14px;">${data.error || "Неизвестная ошибка"}</p>
+        <a class="again-btn" href="#" onclick="resetDropZone();return false;">↩ Попробовать снова</a>
+      `;
     }
   }
 
