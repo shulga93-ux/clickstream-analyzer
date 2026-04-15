@@ -185,8 +185,8 @@ def detect_trends(df: pd.DataFrame) -> dict:
 # ─── 3. DoD: each weekday vs same weekday -7 days (no Sundays) ───────────────
 
 def detect_dod(df: pd.DataFrame) -> list:
-    """Compare each weekday vs same weekday -7 days across all available dates.
-    Excludes Sundays (weekday == 6).
+    """Compare each weekday vs same weekday -7 days across last 7 working days.
+    Excludes Sundays (weekday == 6) and Mondays (weekday == 0, unreliable base after Sunday gap).
     Threshold: |pct| > 50 and |delta| > 5.
     Returns all deviations sorted by |delta| desc (reporter limits to top 50).
     """
@@ -205,9 +205,10 @@ def detect_dod(df: pd.DataFrame) -> list:
     available_cols = [c for c in _GROUP_COLS if c in df2.columns]
     grp_cols = available_cols
 
-    # Take only last 7 non-Sunday dates
-    non_sunday_dates = [d for d in dates if d.weekday() != 6]
-    recent_dates = non_sunday_dates[-7:] if len(non_sunday_dates) >= 7 else non_sunday_dates
+    # Take only last 7 non-Sunday, non-Monday dates
+    # Monday excluded: it follows Sunday (excluded day) so comparison base is unreliable
+    valid_dates = [d for d in dates if d.weekday() not in (0, 6)]
+    recent_dates = valid_dates[-7:] if len(valid_dates) >= 7 else valid_dates
 
     all_deviations = []
 

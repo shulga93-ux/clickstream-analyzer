@@ -1160,7 +1160,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
   <!-- DoD section (full width) -->
   <div class="section">
-    <h2>📆 Топ-50 DoD отклонений — день недели к тому же дню предыдущей недели
+    <h2>📆 Топ-50 DoD отклонений — день недели к тому же дню предыдущей недели (вт–сб, >50%)
       {% if dod_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">{{ dod_meta.date_from }} – {{ dod_meta.date_to }}</span>{% endif %}
     </h2>
     {% if dod_grouped %}
