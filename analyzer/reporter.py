@@ -212,7 +212,7 @@ def _build_charts(df: pd.DataFrame, results: dict, metric_id: str = "") -> dict:
 
     # Store in charts dict as JSON-serialisable data (rendered via template table)
     charts["wow_grouped"] = wow_grouped[:20]
-    charts["dod_grouped"] = dod[:50]   # top 50 already sorted by |delta|
+    charts["dod_grouped"] = dod  # already limited to last 7 non-Sunday days, sorted by |delta|
     charts["wow_meta"] = {
         "curr_week_start": wow[0].get("curr_week_start", wow[0]["date_from"]),
         "curr_week_end":   wow[0].get("curr_week_end",   wow[0]["date_to"]),
@@ -1160,7 +1160,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
   <!-- DoD section (full width) -->
   <div class="section">
-    <h2>📆 Топ-50 DoD отклонений — день недели к тому же дню предыдущей недели (вт–сб, >50%)
+    <h2>📆 DoD отклонения за последние 7 дней (>50%) — день к тому же дню предыдущей недели
       {% if dod_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">{{ dod_meta.date_from }} – {{ dod_meta.date_to }}</span>{% endif %}
     </h2>
     {% if dod_grouped %}
