@@ -207,7 +207,8 @@ def _build_charts(df: pd.DataFrame, results: dict, metric_id: str = "") -> dict:
     wow = results.get("wow", [])
     wow_grouped = _group_by_product(wow) if wow else []
 
-    # Enrich wow_grouped with 55558 success/ratio data for «Кандидаты» report
+    # Enrich wow_grouped with 55558 success data for «Кандидаты» report
+    # Ratio = val_curr (55556 errors) / (val_curr + ss_success (55558)) × 100
     if metric_id == "candidates":
         ss_enrich = results.get("ss_enrichment", {})
         for row in wow_grouped:
@@ -215,9 +216,10 @@ def _build_charts(df: pd.DataFrame, results: dict, metric_id: str = "") -> dict:
             seg  = row.get("segment", "")
             hit  = ss_enrich.get((prod, seg)) or ss_enrich.get((prod, ""))
             if hit:
-                row["ss_error"]   = hit.get("error", 0)
-                row["ss_success"] = hit.get("success", 0)
-                row["ss_ratio"]   = hit.get("ratio")
+                ss_suc = hit.get("success", 0)
+                err    = row.get("val_curr", 0)
+                row["ss_success"] = ss_suc
+                row["ss_ratio"]   = round(err / (err + ss_suc) * 100, 1) if (err + ss_suc) > 0 else None
 
     # Store in charts dict as JSON-serialisable data (rendered via template table)
     charts["wow_grouped"] = wow_grouped[:20]
@@ -982,8 +984,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {{ '+' if is_up else '' }}{{ r.pct }}%
       </td>
       {% if has_ss %}
-      {% set ss_suc = r.ss_success if r.ss_success is defined else none %}
-      {% set ss_rat = r.ss_ratio if r.ss_ratio is defined else none %}
+      {% set ss_suc = r.ss_success if (r.ss_success is defined and r.ss_success is not none) else none %}
+      {% set ss_rat = r.ss_ratio   if (r.ss_ratio   is defined and r.ss_ratio   is not none) else none %}
       <td data-val="{{ ss_suc if ss_suc is not none else '' }}" style="text-align:right;color:#27ae60;">
         {{ "{:,}".format(ss_suc) if ss_suc is not none else '—' }}
       </td>
