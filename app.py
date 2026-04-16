@@ -18,6 +18,7 @@ if _env_path.exists():
 from analyzer.parser import parse_file, get_summary
 from analyzer.detector import detect_all
 from analyzer.reporter import generate_report
+from analyzer.candidates import generate_candidates_report
 
 
 app = Flask(__name__)
@@ -219,6 +220,23 @@ def upload():
             })
         if not reports:
             return jsonify({"error": "Нет данных ни по одной метрике"}), 422
+
+        # Generate «Кандидаты» report (growing ratio 55556/55558)
+        cand_filename = f"report_{upload_id}_candidates.html"
+        cand_path = REPORT_DIR / cand_filename
+        cand_count = generate_candidates_report(df_full, str(cand_path))
+        reports.append({
+            "metric_id": "candidates",
+            "label": "🎯 Кандидаты",
+            "report_url": f"/reports/{cand_filename}",
+            "total_records": cand_count,
+            "total_val": 0,
+            "unique_products": cand_count,
+            "date_range": {},
+            "anomalies_found": 0,
+            "wow_deviations": cand_count,
+            "dod_deviations": 0,
+        })
 
         # Also keep a combined summary
         summary_full = get_summary(df_full)

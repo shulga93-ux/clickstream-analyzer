@@ -1,331 +1,330 @@
 """
-Кандидаты в Проблемы — сравнение последних 7 дней с предыдущими 7 днями.
-Порог: рост > 50% считается кандидатом.
+Кандидаты report: products where ratio 55556_errors/(55556_errors+55558_success)
+is growing week-over-week. Format similar to Статусный Экран (55558).
 """
-import pandas as pd
+from __future__ import annotations
 import datetime as _dt
-from pathlib import Path
-from jinja2 import Template
+import json
+from pathlib import Path as _Path
+import pandas as pd
 
 
-THRESHOLD_PCT = 50  # % роста → кандидат
+# ─── helpers ──────────────────────────────────────────────────────────────────
+
+def _no_sunday(d: _dt.date) -> bool:
+    return d.weekday() != 6
 
 
-# ─── Detection ────────────────────────────────────────────────────────────────
-
-def _get_periods(df: pd.DataFrame):
-    last_date  = df["report_dt"].dt.date.max()
-    curr_end   = last_date
-    curr_start = last_date - _dt.timedelta(days=6)
-    prev_end   = last_date - _dt.timedelta(days=7)
-    prev_start = last_date - _dt.timedelta(days=13)
-    return curr_start, curr_end, prev_start, prev_end
+def _ratio(err: float, suc: float) -> float | None:
+    total = err + suc
+    return round(err / total * 100, 2) if total > 0 else None
 
 
-def detect_tech_error_candidates(df: pd.DataFrame, metric_id: str) -> dict:
+def _wow_trend(series: dict[str, float], dates_no_sun: list[str]):
+    """Compare avg ratio last 7 days vs prev 7 days. Returns (pct_change, direction)."""
+    avail = [d for d in dates_no_sun if d in series]
+    if len(avail) < 4:
+        return None, "stable"
+    h = min(7, len(avail) // 2)
+    curr_vals = [series[d] for d in avail[-h:]]
+    prev_vals = [series[d] for d in avail[-2*h:-h]]
+    curr_avg = sum(curr_vals) / len(curr_vals)
+    prev_avg = sum(prev_vals) / len(prev_vals)
+    if prev_avg == 0:
+        return None, "stable"
+    pct = round((curr_avg - prev_avg) / prev_avg * 100, 1)
+    direction = "growing" if pct > 15 else ("declining" if pct < -15 else "stable")
+    return pct, direction
+
+
+# ─── main entry point ─────────────────────────────────────────────────────────
+
+def generate_candidates_report(df_full: pd.DataFrame, output_path: str) -> int:
     """
-    Compare last 7 days vs previous 7 days for given metric_id.
-    Group by (lvl_2, lvl_3, block_type).
-    Returns candidates (growth > THRESHOLD_PCT) and full comparison table.
+    Build Кандидаты report: products with growing error/success ratio (55556/55558).
+    Returns count of candidates.
     """
-    df_m = df[df["metric_id"] == metric_id].copy()
-    if df_m.empty:
-        return {"candidates": [], "all_rows": [], "periods": {}, "metric_id": metric_id}
+    df_56 = df_full[df_full["metric_id"] == "55556"].copy()
+    df_58 = df_full[df_full["metric_id"] == "55558"].copy()
 
-    df_m["date"] = df_m["report_dt"].dt.date
-    curr_start, curr_end, prev_start, prev_end = _get_periods(df_m)
+    if df_56.empty or df_58.empty:
+        _Path(output_path).write_text(_empty_html(), encoding="utf-8")
+        return 0
 
-    df_curr = df_m[(df_m["date"] >= curr_start) & (df_m["date"] <= curr_end)]
-    df_prev = df_m[(df_m["date"] >= prev_start) & (df_m["date"] <= prev_end)]
+    # Daily errors per product from 55556
+    df_56["date"] = df_56["report_dt"].dt.date
+    err_grp = df_56.groupby(["lvl_2", "lvl_1", "date"])["val"].sum().reset_index()
+    err_grp.columns = ["product", "segment", "date", "errors"]
 
-    group_cols = ["lvl_2", "lvl_3", "block_type", "segment_name", "channel_name"]
+    # Daily successes per product from 55558
+    df_58["date"] = df_58["report_dt"].dt.date
+    suc_58 = df_58[df_58["lvl_4"] == "Успех"].copy()
+    suc_grp = suc_58.groupby(["lvl_2", "date"])["val"].sum().reset_index()
+    suc_grp.columns = ["product", "date", "success"]
 
-    agg_curr = df_curr.groupby(group_cols)["val"].sum().reset_index().rename(columns={"val": "curr_val"})
-    agg_prev = df_prev.groupby(group_cols)["val"].sum().reset_index().rename(columns={"val": "prev_val"})
+    # Merge on (product, date)
+    merged = err_grp.merge(suc_grp, on=["product", "date"], how="left")
+    merged["success"] = merged["success"].fillna(0)
+    merged["date_str"] = merged["date"].astype(str)
 
-    merged = pd.merge(agg_curr, agg_prev, on=group_cols, how="outer").fillna(0)
-    merged["curr_val"] = merged["curr_val"].astype(int)
-    merged["prev_val"] = merged["prev_val"].astype(int)
-    merged["delta"]    = merged["curr_val"] - merged["prev_val"]
-    merged["pct"]      = merged.apply(
-        lambda r: round((r["delta"] / r["prev_val"]) * 100, 1) if r["prev_val"] > 0 else None,
-        axis=1,
-    )
-    # Резервные блоки не считаются кандидатами
-    merged["is_candidate"] = merged.apply(
-        lambda r: r["pct"] is not None and r["pct"] > THRESHOLD_PCT and r["block_type"] != "резервный",
-        axis=1,
-    )
-    merged = merged.sort_values(["is_candidate", "curr_val"], ascending=[False, False])
+    # All non-Sunday dates sorted
+    all_dates = sorted(merged["date"].unique())
+    dates_no_sun = sorted([str(d) for d in all_dates if _no_sunday(d)])
 
-    def to_row(r):
-        return {
-            "lvl_2":        str(r["lvl_2"]),
-            "lvl_3":        str(r["lvl_3"]),
-            "block_type":   str(r["block_type"]),
-            "segment":      str(r["segment_name"]),
-            "channel":      str(r["channel_name"]),
-            "curr_val":     int(r["curr_val"]),
-            "prev_val":     int(r["prev_val"]),
-            "delta":        int(r["delta"]),
-            "pct":          r["pct"],
-            "is_candidate": bool(r["is_candidate"]),
+    # Per-product ratio series + trend
+    products_data = []
+    for (prod, seg), grp in merged.groupby(["product", "segment"]):
+        series: dict[str, float] = {}
+        for _, row in grp.iterrows():
+            r = _ratio(row["errors"], row["success"])
+            if r is not None:
+                series[row["date_str"]] = r
+
+        if len(series) < 4:
+            continue
+
+        pct, direction = _wow_trend(series, dates_no_sun)
+        if direction != "growing":
+            continue
+
+        # Current ratio (avg last 7 non-sun days)
+        avail = [d for d in dates_no_sun if d in series]
+        curr_avg = round(sum(series[d] for d in avail[-7:]) / min(7, len(avail)), 1) if avail else None
+        prev_avg = round(sum(series[d] for d in avail[-14:-7]) / min(7, len(avail[-14:-7])), 1) if len(avail) >= 8 else None
+
+        # Total errors (for sorting)
+        total_err = int(grp["errors"].sum())
+
+        products_data.append({
+            "name": str(prod),
+            "segment": str(seg),
+            "series": series,
+            "pct": pct,
+            "curr_avg": curr_avg,
+            "prev_avg": prev_avg,
+            "total_err": total_err,
+        })
+
+    # Sort by pct descending
+    products_data.sort(key=lambda x: (x["pct"] or 0), reverse=True)
+
+    if not products_data:
+        _Path(output_path).write_text(_empty_html(), encoding="utf-8")
+        return 0
+
+    html = _render(products_data, dates_no_sun, df_full)
+    _Path(output_path).write_text(html, encoding="utf-8")
+    return len(products_data)
+
+
+# ─── render ───────────────────────────────────────────────────────────────────
+
+def _empty_html() -> str:
+    return """<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">
+<title>Кандидаты</title></head><body style="font-family:sans-serif;padding:40px;">
+<h2>Кандидаты</h2><p>Нет продуктов с растущим трендом ошибок.</p></body></html>"""
+
+
+def _render(products: list, dates: list[str], df_full: pd.DataFrame) -> str:
+    import uuid as _uuid
+    uid = str(_uuid.uuid4())[:8]
+    generated_at = _dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    n = len(products)
+    avg_ratio = round(sum(p["curr_avg"] or 0 for p in products) / n, 1) if n else 0
+
+    # Build Plotly traces per product (ratio line)
+    traces_js_parts = []
+    vis_map = {}
+    for i, p in enumerate(products):
+        x = sorted(p["series"].keys())
+        y = [p["series"][d] for d in x]
+        visible = True if i == 0 else False
+        vis_map[p["name"]] = [True if j == i else False for j in range(n)]
+        trace = {
+            "x": x, "y": y,
+            "name": "Доля ошибок %",
+            "type": "scatter", "mode": "lines+markers",
+            "line": {"color": "#e74c3c", "width": 2},
+            "marker": {"size": 5},
+            "visible": visible,
+            "hovertemplate": "%{x}: %{y:.1f}%<extra></extra>",
         }
+        traces_js_parts.append(json.dumps(trace))
 
-    all_rows   = [to_row(r) for _, r in merged.iterrows()]
-    candidates = [row for row in all_rows if row["is_candidate"]]
+    traces_js = "[" + ",\n".join(traces_js_parts) + "]"
+    vis_map_js = json.dumps(vis_map)
 
-    return {
-        "metric_id":     metric_id,
-        "candidates":    candidates,
-        "all_rows":      all_rows,
-        "periods":       {
-            "curr_start": str(curr_start),
-            "curr_end":   str(curr_end),
-            "prev_start": str(prev_start),
-            "prev_end":   str(prev_end),
-        },
-        "threshold_pct": THRESHOLD_PCT,
-    }
+    # Dropdown options
+    opts_html = ""
+    for p in products:
+        sign = "+" if (p["pct"] or 0) > 0 else ""
+        pct_str = f"{sign}{p['pct']}%" if p["pct"] is not None else "—"
+        opts_html += f'<option value="{p["name"]}">{p["name"]}  [{pct_str} WoW]</option>\n'
 
+    # Table rows
+    rows_html = ""
+    for p in products:
+        sign = "+" if (p["pct"] or 0) > 0 else ""
+        pct_str = f"{sign}{p['pct']}%" if p["pct"] is not None else "—"
+        curr_str = f"{p['curr_avg']}%" if p["curr_avg"] is not None else "—"
+        prev_str = f"{p['prev_avg']}%" if p["prev_avg"] is not None else "—"
+        rows_html += f"""<tr>
+  <td><strong>{p['name']}</strong></td>
+  <td style="color:#666;font-size:0.82rem;">{p['segment']}</td>
+  <td style="text-align:right;">{p['total_err']:,}</td>
+  <td style="text-align:right;color:#888;">{prev_str}</td>
+  <td style="text-align:right;font-weight:600;">{curr_str}</td>
+  <td style="text-align:right;font-weight:700;color:#e74c3c;">{pct_str}</td>
+</tr>"""
 
-def build_candidates_results(df: pd.DataFrame) -> dict:
-    return {
-        "tech_error": detect_tech_error_candidates(df, "55556"),
-        # разделы 2 и 3 — будут добавлены позже
-    }
-
-
-# ─── Report ───────────────────────────────────────────────────────────────────
-
-def generate_candidates_report(df: pd.DataFrame, output_path: str) -> str:
-    results = build_candidates_results(df)
-    html = _render(results)
-    Path(output_path).write_text(html, encoding="utf-8")
-    return output_path
-
-
-def _render(results: dict) -> str:
-    import datetime
-    generated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    template = Template(CANDIDATES_TEMPLATE)
-    return template.render(generated_at=generated_at, results=results)
-
-
-# ─── HTML Template ─────────────────────────────────────────────────────────────
-# NOTE: macro must be declared before first use in Jinja2
-
-CANDIDATES_TEMPLATE = r"""
-{% macro render_table(rows, tbl_id) %}
-{% if not rows %}
-<div class="empty-state">Нет данных</div>
-{% else %}
-{% set max_val = namespace(v=1) %}
-{% for r in rows %}{% if r.curr_val > max_val.v %}{% set max_val.v = r.curr_val %}{% endif %}{% endfor %}
-<div style="overflow-x:auto;">
-<table id="{{ tbl_id }}_tbl">
-  <thead>
-    <tr>
-      <th></th>
-      <th>Продукт</th>
-      <th>Блок</th>
-      <th>Тип блока</th>
-      <th>Сегмент</th>
-      <th>Канал</th>
-      <th style="text-align:right">Пред. 7д</th>
-      <th style="text-align:right">Тек. 7д</th>
-      <th style="text-align:right">Δval</th>
-      <th style="text-align:right">Δ%</th>
-      <th style="width:90px"></th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for r in rows %}
-  {% set is_cand = r.is_candidate %}
-  {% set bar_w = ((r.curr_val / max_val.v) * 86) | int %}
-  <tr class="{{ 'candidate' if is_cand else '' }}">
-    <td>{{ "🚨" if is_cand else "" }}</td>
-    <td><strong>{{ r.lvl_2 }}</strong></td>
-    <td style="color:#555;">{{ r.lvl_3 }}</td>
-    <td><span class="block-pill block-{{ r.block_type }}">{{ r.block_type }}</span></td>
-    <td style="color:#666;font-size:0.8rem;">{{ r.segment }}</td>
-    <td style="color:#666;font-size:0.8rem;">{{ r.channel }}</td>
-    <td style="text-align:right;color:#888;">{{ "{:,}".format(r.prev_val) }}</td>
-    <td style="text-align:right;font-weight:600;">{{ "{:,}".format(r.curr_val) }}</td>
-    <td style="text-align:right;font-weight:700;
-               color:{{ '#e74c3c' if r.delta > 0 else ('#27ae60' if r.delta < 0 else '#888') }};">
-      {{ '+' if r.delta > 0 else '' }}{{ "{:,}".format(r.delta) }}
-    </td>
-    <td style="text-align:right;">
-      {% if r.pct is not none %}
-        <span class="badge {{ 'badge-red' if r.pct > 50 else ('badge-green' if r.pct < 0 else 'badge-gray') }}">
-          {{ '+' if r.pct > 0 else '' }}{{ r.pct }}%
-        </span>
-      {% else %}
-        <span class="badge badge-orange">new</span>
-      {% endif %}
-    </td>
-    <td>
-      <div class="inline-bar"
-           style="width:{{ bar_w }}px;background:{{ '#e74c3c' if r.is_candidate else ('#3498db' if r.delta < 0 else '#95a5a6') }};"></div>
-    </td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
-{% endif %}
-{% endmacro %}
-<!DOCTYPE html>
+    html = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Кандидаты в Проблемы — СБОЛ.про</title>
+  <title>Кандидаты в проблемы</title>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-           background: #f0f2f5; color: #1a1a2e; line-height: 1.6; }
-    .header { background: linear-gradient(135deg, #1a1a2e 0%, #6d1f1f 60%, #c0392b 100%);
-              color: white; padding: 36px 40px; }
-    .header h1 { font-size: 1.9rem; font-weight: 700; margin-bottom: 6px; }
-    .header .meta { opacity: 0.75; font-size: 0.88rem; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
-    .section { background: white; border-radius: 12px; padding: 24px;
-               margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .section-header { display: flex; align-items: center; gap: 12px;
-                      padding-bottom: 14px; border-bottom: 2px solid #f0f2f5; margin-bottom: 16px; flex-wrap: wrap; }
-    .section-header h2 { font-size: 1.1rem; font-weight: 700; }
-    .period-badge { font-size: 0.78rem; color: #888; background: #f0f2f5;
-                    padding: 3px 10px; border-radius: 20px; margin-left: auto; }
-    .summary-row { display: flex; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
-    .kpi { background: #f8f9fa; border-radius: 8px; padding: 14px 20px; text-align: center; min-width: 120px; }
-    .kpi .num { font-size: 1.6rem; font-weight: 700; }
-    .kpi .lbl { font-size: 0.73rem; color: #888; text-transform: uppercase; margin-top: 3px; }
-    .kpi.red .num   { color: #e74c3c; }
-    .kpi.green .num { color: #27ae60; }
-    .kpi.blue .num  { color: #3498db; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-    th { text-align: left; padding: 8px 10px; background: #f8f9fa;
-         font-size: 0.74rem; text-transform: uppercase; color: #888; white-space: nowrap;
-         position: sticky; top: 0; z-index: 1; }
-    td { padding: 7px 10px; border-bottom: 1px solid #f4f4f4; vertical-align: middle; }
-    tr:last-child td { border-bottom: none; }
-    tr.candidate td  { background: #fff8f8; }
-    tr.candidate:hover td { background: #fff0f0; }
-    tr:not(.candidate):hover td { background: #fafafa; }
-    .badge { display: inline-block; padding: 2px 9px; border-radius: 12px;
-             font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
-    .badge-red    { background: #fde8e8; color: #c0392b; }
-    .badge-green  { background: #e8f8ee; color: #1e8449; }
-    .badge-blue   { background: #e8f0fe; color: #2471a3; }
-    .badge-gray   { background: #f0f0f0; color: #888; }
-    .badge-orange { background: #fff3cd; color: #d68910; }
-    .block-pill { display: inline-block; padding: 1px 7px; border-radius: 8px;
-                  font-size: 0.72rem; font-weight: 600; }
-    .block-боевой    { background: #fde8e8; color: #c0392b; }
-    .block-пилотный  { background: #e8f8ee; color: #1e8449; }
-    .block-резервный { background: #e8f0fe; color: #2471a3; }
-    .block-неизвестный { background: #f0f0f0; color: #888; }
-    .inline-bar { height: 8px; border-radius: 3px; display: inline-block; min-width: 2px; }
-    .empty-state { text-align: center; padding: 24px; color: #aaa; }
-    .footer { text-align: center; padding: 28px; color: #aaa; font-size: 0.83rem; }
-    .tab-nav { display: flex; gap: 4px; margin-bottom: 0; border-bottom: 2px solid #e0e0e0; }
-    .tab-btn { padding: 8px 18px; border: none; background: none; cursor: pointer;
-               font-size: 0.9rem; color: #888; border-bottom: 2px solid transparent;
-               margin-bottom: -2px; transition: all 0.15s; border-radius: 4px 4px 0 0; }
-    .tab-btn.active { color: #e74c3c; border-bottom-color: #e74c3c; font-weight: 700; background: #fff8f8; }
-    .tab-btn:hover:not(.active) { background: #f8f8f8; }
-    .tab-content { display: none; padding-top: 16px; }
-    .tab-content.active { display: block; }
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f6fa; color: #2c3e50; }}
+    .header {{ background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); color: #fff; padding: 28px 40px; }}
+    .header h1 {{ font-size: 1.6rem; font-weight: 700; }}
+    .header .sub {{ opacity: .8; font-size: 0.85rem; margin-top: 4px; }}
+    .container {{ max-width: 1400px; margin: 0 auto; padding: 32px 24px; }}
+    .kpi-row {{ display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }}
+    .kpi-card {{ background: #fff; border-radius: 10px; padding: 18px 24px; flex: 1; min-width: 160px;
+                 box-shadow: 0 2px 8px rgba(0,0,0,.06); }}
+    .kpi-card .value {{ font-size: 2rem; font-weight: 700; }}
+    .kpi-card .label {{ font-size: 0.78rem; color: #888; text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }}
+    .section {{ background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,.06); margin-bottom: 24px; }}
+    .section h2 {{ font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; color: #2c3e50; }}
+    .drill-controls {{ display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }}
+    .drill-controls label {{ font-size: 0.85rem; color: #666; font-weight: 600; }}
+    .drill-controls select {{ padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px;
+                              font-size: 0.85rem; background: #fff; min-width: 280px; max-width: 480px; }}
+    table.stat-table {{ width: 100%; border-collapse: collapse; font-size: 0.88rem; }}
+    table.stat-table thead tr {{ background: #f8f9fa; }}
+    table.stat-table th {{ padding: 10px 12px; text-align: left; font-size: 0.78rem; text-transform: uppercase;
+                          color: #888; letter-spacing: .04em; border-bottom: 2px solid #e8ecf0; white-space: nowrap; }}
+    table.stat-table td {{ padding: 10px 12px; border-bottom: 1px solid #f0f3f7; vertical-align: middle; }}
+    table.stat-table tbody tr:hover {{ background: #f8faff; }}
+    .badge-grow {{ background: #fdecea; color: #c0392b; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600; }}
+    .empty-state {{ text-align: center; padding: 40px; color: #888; font-size: 0.95rem; }}
   </style>
 </head>
 <body>
-
-<div class="header">
-  <h1>🚨 Кандидаты в Проблемы — СБОЛ.про</h1>
-  <div class="meta">
-    {% set p = results.tech_error.periods %}
-    Текущий период: <strong style="color:rgba(255,255,255,0.9);">{{ p.curr_start }} → {{ p.curr_end }}</strong>
-    &nbsp;·&nbsp;
-    Предыдущий: {{ p.prev_start }} → {{ p.prev_end }}
-    &nbsp;·&nbsp; Порог роста: +{{ results.tech_error.threshold_pct }}%
-    &nbsp;·&nbsp; Сгенерировано: {{ generated_at }}
+  <div class="header">
+    <h1>🎯 Кандидаты в проблемы</h1>
+    <div class="sub">Продукты с растущим трендом доли ошибок (55556 / 55558) — сформировано {generated_at}</div>
   </div>
-</div>
+  <div class="container">
 
-<div class="container">
-
-  {# ── Раздел 1: Тех Ошибка (55556) ── #}
-  {% set te = results.tech_error %}
-  {% set p  = te.periods %}
-  <div class="section">
-    <div class="section-header">
-      <span style="font-size:1.4rem;">⚠️</span>
-      <h2>Тех Ошибка &nbsp;<span style="font-weight:400;color:#888;font-size:0.85rem;">metric_id 55556</span></h2>
-      <span class="period-badge">Резервные блоки исключены из кандидатов</span>
-    </div>
-
-    {% if te.all_rows %}
-    <div class="summary-row">
-      <div class="kpi red">
-        <div class="num">{{ te.candidates | length }}</div>
-        <div class="lbl">Кандидатов (&gt;{{ te.threshold_pct }}%)</div>
+    <!-- KPI -->
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="value" style="color:#e74c3c;">{n}</div>
+        <div class="label">Кандидатов</div>
       </div>
-      <div class="kpi blue">
-        <div class="num">{{ te.all_rows | length }}</div>
-        <div class="lbl">Пар продукт / блок</div>
+      <div class="kpi-card">
+        <div class="value" style="color:#c0392b;">{avg_ratio}%</div>
+        <div class="label">Ср. доля ошибок</div>
       </div>
-      <div class="kpi green">
-        <div class="num">{{ te.all_rows | selectattr('delta', 'lt', 0) | list | length }}</div>
-        <div class="lbl">Снижение</div>
+      <div class="kpi-card">
+        <div class="value" style="color:#888;">{dates[0] if dates else '—'}</div>
+        <div class="label">Начало периода</div>
       </div>
-      <div class="kpi">
-        <div class="num">{{ te.all_rows | selectattr('pct', 'none') | list | length }}</div>
-        <div class="lbl">Новые (нет истории)</div>
+      <div class="kpi-card">
+        <div class="value" style="color:#888;">{dates[-1] if dates else '—'}</div>
+        <div class="label">Конец периода</div>
       </div>
     </div>
 
-    <div class="tab-nav">
-      <button class="tab-btn active" onclick="switchTab(this,'cand_te','te')">
-        🚨 Кандидаты ({{ te.candidates | length }})
-      </button>
-      <button class="tab-btn" onclick="switchTab(this,'all_te','te')">
-        📋 Все пары ({{ te.all_rows | length }})
-      </button>
+    <!-- Chart drill-down -->
+    <div class="section">
+      <h2>📈 Динамика доли ошибок по продукту день за днём</h2>
+      <div class="drill-controls">
+        <label>Продукт:</label>
+        <select id="cand_select_{uid}" onchange="candUpdate_{uid}(this.value)">
+          {opts_html}
+        </select>
+      </div>
+      <div id="cand_chart_{uid}" style="height:320px;"></div>
     </div>
-    <div id="cand_te" class="tab-content active">
-      {% if te.candidates %}
-        {{ render_table(te.candidates, 'cand_te') }}
-      {% else %}
-        <div class="empty-state">✅ Кандидатов нет — рост ниже {{ te.threshold_pct }}%</div>
-      {% endif %}
+
+    <!-- Table -->
+    <div class="section">
+      <h2>📋 Продукты с растущим трендом ({n})</h2>
+      <div style="overflow-x:auto;">
+      <table class="stat-table" id="cand_tbl_{uid}">
+        <thead>
+          <tr>
+            <th style="cursor:pointer;" data-col="0">Продукт ⇅</th>
+            <th style="cursor:pointer;" data-col="1">Сегмент ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="2">Σ ошибок ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="3">Пред. неделя ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="4">Тек. неделя ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="5">Тренд WoW ⇅</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows_html}
+        </tbody>
+      </table>
+      </div>
     </div>
-    <div id="all_te" class="tab-content">
-      {{ render_table(te.all_rows, 'all_te') }}
-    </div>
-    {% else %}
-    <div class="empty-state">Нет данных по metric_id 55556</div>
-    {% endif %}
+
   </div>
 
-  {# Разделы 2 и 3 будут добавлены позже #}
+  <script>
+  (function() {{
+    var TRACES = {traces_js};
+    var VIS_MAP = {vis_map_js};
 
-</div>
+    var layout = {{
+      margin: {{t:20, b:50, l:50, r:20}},
+      plot_bgcolor: "#fff", paper_bgcolor: "#fff",
+      xaxis: {{showgrid: true, gridcolor: "#f0f3f7"}},
+      yaxis: {{showgrid: true, gridcolor: "#f0f3f7", title: "Доля ошибок %", rangemode: "tozero"}},
+      hovermode: "x unified",
+      legend: {{orientation: "h", y: -0.15}},
+    }};
 
-<div class="footer">Кандидаты в Проблемы · СБОЛ.про · {{ generated_at }}</div>
+    Plotly.newPlot("cand_chart_{uid}", TRACES, layout, {{responsive: true, displayModeBar: false}});
 
-<script>
-function switchTab(btn, tabId, group) {
-  document.querySelectorAll('.tab-content').forEach(el => {
-    if (el.id && el.id.endsWith('_' + group)) el.classList.remove('active');
-  });
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById(tabId).classList.add('active');
-  btn.classList.add('active');
-}
-</script>
+    window.candUpdate_{uid} = function(prod) {{
+      var vis = VIS_MAP[prod] || [];
+      var update = {{visible: vis}};
+      Plotly.restyle("cand_chart_{uid}", update);
+    }};
 
+    // Table sort
+    (function() {{
+      var tbl = document.getElementById("cand_tbl_{uid}");
+      if (!tbl) return;
+      var state = {{col: null, dir: null}};
+      tbl.querySelectorAll("thead th[data-col]").forEach(function(th) {{
+        th.addEventListener("click", function() {{
+          var col = parseInt(th.getAttribute("data-col"));
+          var dir = (state.col === col && state.dir === "asc") ? "desc" : "asc";
+          var tbody = tbl.querySelector("tbody");
+          var rows = Array.from(tbody.querySelectorAll("tr"));
+          rows.sort(function(a, b) {{
+            var av = (a.cells[col] || {{}}).textContent.trim().replace(/[+%,]/g,"");
+            var bv = (b.cells[col] || {{}}).textContent.trim().replace(/[+%,]/g,"");
+            var an = parseFloat(av), bn = parseFloat(bv);
+            var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru");
+            return dir === "desc" ? -cmp : cmp;
+          }});
+          rows.forEach(function(r) {{ tbody.appendChild(r); }});
+          state.col = col; state.dir = dir;
+        }});
+      }});
+      // default sort by trend desc
+      tbl.querySelector("thead th[data-col='5']").click();
+      tbl.querySelector("thead th[data-col='5']").click();
+    }})();
+  }})();
+  </script>
 </body>
-</html>
-"""
+</html>"""
+    return html
