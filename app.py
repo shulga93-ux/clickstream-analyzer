@@ -45,7 +45,6 @@ ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 METRIC_LABELS = {
     "55556": "Тех Ошибка",
-    "55557": "Тех Ошибка (UnknownApp)",
     "55558": "Статусный экран",
 }
 
