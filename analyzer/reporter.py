@@ -207,6 +207,18 @@ def _build_charts(df: pd.DataFrame, results: dict, metric_id: str = "") -> dict:
     wow = results.get("wow", [])
     wow_grouped = _group_by_product(wow) if wow else []
 
+    # Enrich wow_grouped with 55558 success/ratio data for «Кандидаты» report
+    if metric_id == "candidates":
+        ss_enrich = results.get("ss_enrichment", {})
+        for row in wow_grouped:
+            prod = row.get("lvl_2", "")
+            seg  = row.get("segment", "")
+            hit  = ss_enrich.get((prod, seg)) or ss_enrich.get((prod, ""))
+            if hit:
+                row["ss_error"]   = hit.get("error", 0)
+                row["ss_success"] = hit.get("success", 0)
+                row["ss_ratio"]   = hit.get("ratio")
+
     # Store in charts dict as JSON-serialisable data (rendered via template table)
     charts["wow_grouped"] = wow_grouped[:20]
     charts["wow_meta"] = {
@@ -936,16 +948,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   {% if rows %}
   {% set max_delta = namespace(v=1) %}
   {% for r in rows %}{% if r.delta | abs > max_delta.v %}{% set max_delta.v = r.delta | abs %}{% endif %}{% endfor %}
+  {% set has_ss = rows | selectattr("ss_success", "defined") | list | length > 0 %}
   <div style="overflow-x:auto;">
   <table class="stat-table dev-tbl" id="wow_dev_tbl">
     <thead>
       <tr>
-        <th style="width:34%;cursor:pointer;user-select:none;white-space:nowrap;" data-col="0">Продукт <span class="si">⇅</span></th>
+        <th style="width:28%;cursor:pointer;user-select:none;white-space:nowrap;" data-col="0">Продукт <span class="si">⇅</span></th>
         <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Сегмент <span class="si">⇅</span></th>
         <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Пред. неделя (Σ ошибок) <span class="si">⇅</span></th>
         <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Тек. неделя (Σ ошибок) <span class="si">⇅</span></th>
         <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Δval <span class="si">⇅</span></th>
         <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">% <span class="si">⇅</span></th>
+        {% if has_ss %}
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="6">Успех (55558) <span class="si">⇅</span></th>
+        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="7">% доля Ошибок <span class="si">⇅</span></th>
+        {% endif %}
         <th style="width:80px;"></th>
       </tr>
     </thead>
@@ -964,6 +981,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <td data-val="{{ r.pct }}" style="text-align:right;font-weight:600;color:{{ '#e74c3c' if is_up else '#3498db' }};">
         {{ '+' if is_up else '' }}{{ r.pct }}%
       </td>
+      {% if has_ss %}
+      {% set ss_suc = r.ss_success if r.ss_success is defined else none %}
+      {% set ss_rat = r.ss_ratio if r.ss_ratio is defined else none %}
+      <td data-val="{{ ss_suc if ss_suc is not none else '' }}" style="text-align:right;color:#27ae60;">
+        {{ "{:,}".format(ss_suc) if ss_suc is not none else '—' }}
+      </td>
+      <td data-val="{{ ss_rat if ss_rat is not none else '' }}" style="text-align:right;font-weight:600;color:{{ '#e74c3c' if (ss_rat is not none and ss_rat > 20) else '#888' }};">
+        {{ ss_rat|string + '%' if ss_rat is not none else '—' }}
+      </td>
+      {% endif %}
       <td>
         <div style="background:{{ '#e74c3c' if is_up else '#3498db' }};height:10px;border-radius:3px;width:{{ bar_w }}px;min-width:2px;"></div>
       </td>

@@ -221,11 +221,35 @@ def upload():
             # Collect for СВОД
             all_results_for_svod.append((metric_id, label, results))
 
-            # «Кандидаты» — duplicate of Тех Ошибка (55556) report
+            # «Кандидаты» — duplicate of Тех Ошибка (55556) enriched with 55558 success/ratio data
             if metric_id == "55556":
+                import copy as _copy
+                results_candidates = _copy.deepcopy(results)
+
+                # Build (product, segment) → {error, success, ratio} from 55558 data
+                df_58 = df_full[df_full["metric_id"] == "55558"].copy()
+                ss_enrichment = {}
+                if not df_58.empty:
+                    for lvl4_type, field in [("Ошибка", "error"), ("Успех", "success")]:
+                        sub = df_58[df_58["lvl_4"] == lvl4_type]
+                        if sub.empty:
+                            continue
+                        grp = sub.groupby(["lvl_2", "lvl_1"])["val"].sum()
+                        for (prod, seg), val in grp.items():
+                            key = (str(prod), str(seg))
+                            if key not in ss_enrichment:
+                                ss_enrichment[key] = {"error": 0, "success": 0}
+                            ss_enrichment[key][field] += int(val)
+                    for key in ss_enrichment:
+                        e = ss_enrichment[key]["error"]
+                        s = ss_enrichment[key]["success"]
+                        ss_enrichment[key]["ratio"] = round(e / (e + s) * 100, 1) if (e + s) > 0 else None
+
+                results_candidates["ss_enrichment"] = ss_enrichment
+
                 candidates_filename = f"report_{upload_id}_candidates.html"
                 candidates_path = REPORT_DIR / candidates_filename
-                generate_report(df_m, summary, results, str(candidates_path), metric_id=metric_id)
+                generate_report(df_m, summary, results_candidates, str(candidates_path), metric_id="candidates")
                 reports.append({
                     "metric_id": "candidates",
                     "label": "Кандидаты",
