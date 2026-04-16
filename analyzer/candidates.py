@@ -71,6 +71,14 @@ def generate_candidates_report(df_full: pd.DataFrame, output_path: str) -> int:
     all_dates = sorted(merged["date"].unique())
     dates_no_sun = sorted([str(d) for d in all_dates if _no_sunday(d)])
 
+    # Success lookup by (product, date_str) for week sums
+    suc_lookup: dict[tuple, int] = {}
+    for _, row in suc_grp.iterrows():
+        suc_lookup[(str(row["product"]), str(row["date"]))] = int(row["success"])
+
+    def _week_success(prod: str, week_dates: list[str]) -> int:
+        return sum(suc_lookup.get((prod, d), 0) for d in week_dates)
+
     # Per-product ratio series + trend
     products_data = []
     for (prod, seg), grp in merged.groupby(["product", "segment"]):
@@ -89,8 +97,15 @@ def generate_candidates_report(df_full: pd.DataFrame, output_path: str) -> int:
 
         # Current ratio (avg last 7 non-sun days)
         avail = [d for d in dates_no_sun if d in series]
-        curr_avg = round(sum(series[d] for d in avail[-7:]) / min(7, len(avail)), 1) if avail else None
-        prev_avg = round(sum(series[d] for d in avail[-14:-7]) / min(7, len(avail[-14:-7])), 1) if len(avail) >= 8 else None
+        h = min(7, max(1, len(avail) // 2))
+        curr_dates = avail[-h:]
+        prev_dates = avail[-2*h:-h]
+        curr_avg = round(sum(series[d] for d in curr_dates) / len(curr_dates), 1) if curr_dates else None
+        prev_avg = round(sum(series[d] for d in prev_dates) / len(prev_dates), 1) if prev_dates else None
+
+        # Success sums from 55558 for curr/prev week
+        suc_curr = _week_success(str(prod), curr_dates)
+        suc_prev = _week_success(str(prod), prev_dates)
 
         # Total errors (for sorting)
         total_err = int(grp["errors"].sum())
@@ -103,6 +118,8 @@ def generate_candidates_report(df_full: pd.DataFrame, output_path: str) -> int:
             "curr_avg": curr_avg,
             "prev_avg": prev_avg,
             "total_err": total_err,
+            "suc_curr": suc_curr,
+            "suc_prev": suc_prev,
         })
 
     # Sort by pct descending
@@ -168,6 +185,8 @@ def _render(products: list, dates: list[str], df_full: pd.DataFrame) -> str:
         pct_str = f"{sign}{p['pct']}%" if p["pct"] is not None else "—"
         curr_str = f"{p['curr_avg']}%" if p["curr_avg"] is not None else "—"
         prev_str = f"{p['prev_avg']}%" if p["prev_avg"] is not None else "—"
+        suc_curr_str = f"{p['suc_curr']:,}" if p.get("suc_curr") else "—"
+        suc_prev_str = f"{p['suc_prev']:,}" if p.get("suc_prev") else "—"
         rows_html += f"""<tr>
   <td><strong>{p['name']}</strong></td>
   <td style="color:#666;font-size:0.82rem;">{p['segment']}</td>
@@ -175,6 +194,8 @@ def _render(products: list, dates: list[str], df_full: pd.DataFrame) -> str:
   <td style="text-align:right;color:#888;">{prev_str}</td>
   <td style="text-align:right;font-weight:600;">{curr_str}</td>
   <td style="text-align:right;font-weight:700;color:#e74c3c;">{pct_str}</td>
+  <td style="text-align:right;color:#27ae60;">{suc_prev_str}</td>
+  <td style="text-align:right;color:#27ae60;font-weight:600;">{suc_curr_str}</td>
 </tr>"""
 
     html = f"""<!DOCTYPE html>
@@ -261,9 +282,11 @@ def _render(products: list, dates: list[str], df_full: pd.DataFrame) -> str:
             <th style="cursor:pointer;" data-col="0">Продукт ⇅</th>
             <th style="cursor:pointer;" data-col="1">Сегмент ⇅</th>
             <th style="text-align:right;cursor:pointer;" data-col="2">Σ ошибок ⇅</th>
-            <th style="text-align:right;cursor:pointer;" data-col="3">Пред. неделя ⇅</th>
-            <th style="text-align:right;cursor:pointer;" data-col="4">Тек. неделя ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="3">Доля пред. нед. ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="4">Доля тек. нед. ⇅</th>
             <th style="text-align:right;cursor:pointer;" data-col="5">Тренд WoW ⇅</th>
+            <th style="text-align:right;cursor:pointer;color:#27ae60;" data-col="6">Успех пред. нед. ⇅</th>
+            <th style="text-align:right;cursor:pointer;color:#27ae60;" data-col="7">Успех тек. нед. ⇅</th>
           </tr>
         </thead>
         <tbody>
