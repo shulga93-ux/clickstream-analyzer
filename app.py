@@ -218,63 +218,8 @@ def upload():
                 "wow_deviations": len(results.get("wow", [])),
                 "dod_deviations": len(results.get("dod", [])),
             })
-            # Collect for СВОД
-            all_results_for_svod.append((metric_id, label, results))
-
-            # «Кандидаты» — duplicate of Тех Ошибка (55556) enriched with 55558 success/ratio data
-            if metric_id == "55556":
-                import copy as _copy
-                results_candidates = _copy.deepcopy(results)
-
-                # Build product → {success} from 55558 data (keyed by lvl_2 only)
-                # Ratio = 55556_errors / (55556_errors + 55558_success) × 100
-                df_58 = df_full[df_full["metric_id"] == "55558"].copy()
-                ss_enrichment = {}
-                if not df_58.empty:
-                    sub = df_58[df_58["lvl_4"] == "Успех"]
-                    if not sub.empty:
-                        grp = sub.groupby("lvl_2")["val"].sum()
-                        for prod, val in grp.items():
-                            ss_enrichment[str(prod)] = {"success": int(val)}
-
-                results_candidates["ss_enrichment"] = ss_enrichment
-
-                candidates_filename = f"report_{upload_id}_candidates.html"
-                candidates_path = REPORT_DIR / candidates_filename
-                generate_report(df_m, summary, results_candidates, str(candidates_path), metric_id="candidates")
-                reports.append({
-                    "metric_id": "candidates",
-                    "label": "Кандидаты",
-                    "report_url": f"/reports/{candidates_filename}",
-                    "total_records": summary.get("total_records", 0),
-                    "total_val": summary.get("total_val", 0),
-                    "unique_products": summary.get("unique_products", 0),
-                    "date_range": summary.get("date_range", {}),
-                    "anomalies_found": len(results.get("anomalies", [])),
-                    "wow_deviations": len(results.get("wow", [])),
-                    "dod_deviations": len(results.get("dod", [])),
-                })
-
         if not reports:
             return jsonify({"error": "Нет данных ни по одной метрике"}), 422
-
-        # Generate СВОД report
-        from analyzer.reporter import generate_svod_report
-        svod_filename = f"report_{upload_id}_svod.html"
-        svod_path = REPORT_DIR / svod_filename
-        svod_count = generate_svod_report(all_results_for_svod, str(svod_path))
-        reports.insert(0, {
-            "metric_id": "svod",
-            "label": "📋 СВОД — продукты с отклонениями",
-            "report_url": f"/reports/{svod_filename}",
-            "total_records": svod_count,
-            "total_val": 0,
-            "unique_products": svod_count,
-            "date_range": {},
-            "anomalies_found": 0,
-            "wow_deviations": 0,
-            "dod_deviations": 0,
-        })
 
         # Also keep a combined summary
         summary_full = get_summary(df_full)
