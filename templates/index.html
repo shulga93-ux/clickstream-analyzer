@@ -235,15 +235,14 @@
     const formData = new FormData();
     formData.append("file", file);
 
-    // Animate stages 1–6 while waiting for response
-    // Each stage ~2.5s on average, but we cap at stage 6 (93%) until response arrives
+    // Animate stages 0–4 while waiting for response (stop before "Генерация отчётов")
+    // "Готово" (stage 6) is only shown after server actually responds
     let responseData = null;
     let responseOk = false;
-    let fetchDone = false;
 
-    advanceStages(6, 2200, null);
+    advanceStages(4, 2200, null);  // max advance to "Анализ продуктов" before server replies
 
-    // Kick off fetch
+    // Kick off fetch (no timeout — large files can take 1-3 min)
     try {
       const resp = await fetch("/upload", { method: "POST", body: formData });
       responseData = await resp.json();
@@ -253,16 +252,16 @@
       responseOk = false;
     }
 
-    // Wait until at least stage 6 is shown, then finish
+    // Server responded — fast-forward remaining stages then show result
     clearTimeout(stageTimer);
     function finish() {
-      setStage(7);
-      setTimeout(() => showResult(responseData, responseOk), 500);
+      setStage(6);  // "Готово" at 100%
+      setTimeout(() => showResult(responseData, responseOk), 400);
     }
-    if (currentStageIdx >= 6) {
+    if (currentStageIdx >= 5) {
       finish();
     } else {
-      advanceStages(6, 300, finish);
+      advanceStages(5, 250, finish);  // quickly animate through remaining stages
     }
   }
 
