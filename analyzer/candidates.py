@@ -107,6 +107,11 @@ def generate_candidates_report(df_full: pd.DataFrame, output_path: str) -> int:
         suc_curr = _week_success(str(prod), curr_dates)
         suc_prev = _week_success(str(prod), prev_dates)
 
+        # Error sums from 55556 for curr/prev week
+        err_grp_prod = grp.set_index("date_str")["errors"].to_dict()
+        err_curr = int(sum(err_grp_prod.get(d, 0) for d in curr_dates))
+        err_prev = int(sum(err_grp_prod.get(d, 0) for d in prev_dates))
+
         # Total errors (for sorting)
         total_err = int(grp["errors"].sum())
 
@@ -120,6 +125,8 @@ def generate_candidates_report(df_full: pd.DataFrame, output_path: str) -> int:
             "total_err": total_err,
             "suc_curr": suc_curr,
             "suc_prev": suc_prev,
+            "err_curr": err_curr,
+            "err_prev": err_prev,
         })
 
     # Sort by pct descending
@@ -187,10 +194,12 @@ def _render(products: list, dates: list[str], df_full: pd.DataFrame) -> str:
         prev_str = f"{p['prev_avg']}%" if p["prev_avg"] is not None else "—"
         suc_curr_str = f"{p['suc_curr']:,}" if p.get("suc_curr") else "—"
         suc_prev_str = f"{p['suc_prev']:,}" if p.get("suc_prev") else "—"
+        err_prev_str = f"{p['err_prev']:,}" if p.get("err_prev") is not None else "—"
         rows_html += f"""<tr>
   <td><strong>{p['name']}</strong></td>
   <td style="color:#666;font-size:0.82rem;">{p['segment']}</td>
   <td style="text-align:right;">{p['total_err']:,}</td>
+  <td style="text-align:right;color:#e74c3c;">{err_prev_str}</td>
   <td style="text-align:right;color:#888;">{prev_str}</td>
   <td style="text-align:right;font-weight:600;">{curr_str}</td>
   <td style="text-align:right;font-weight:700;color:#e74c3c;">{pct_str}</td>
@@ -282,11 +291,12 @@ def _render(products: list, dates: list[str], df_full: pd.DataFrame) -> str:
             <th style="cursor:pointer;" data-col="0">Продукт ⇅</th>
             <th style="cursor:pointer;" data-col="1">Сегмент ⇅</th>
             <th style="text-align:right;cursor:pointer;" data-col="2">Σ ошибок ⇅</th>
-            <th style="text-align:right;cursor:pointer;" data-col="3">Доля пред. нед. ⇅</th>
-            <th style="text-align:right;cursor:pointer;" data-col="4">Доля тек. нед. ⇅</th>
-            <th style="text-align:right;cursor:pointer;" data-col="5">Тренд WoW ⇅</th>
-            <th style="text-align:right;cursor:pointer;color:#27ae60;" data-col="6">Успех пред. нед. ⇅</th>
-            <th style="text-align:right;cursor:pointer;color:#27ae60;" data-col="7">Успех тек. нед. ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="3">Ошибки пред. нед. ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="4">Доля пред. нед. ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="5">Доля тек. нед. ⇅</th>
+            <th style="text-align:right;cursor:pointer;" data-col="6">Тренд WoW ⇅</th>
+            <th style="text-align:right;cursor:pointer;color:#27ae60;" data-col="7">Успех пред. нед. ⇅</th>
+            <th style="text-align:right;cursor:pointer;color:#27ae60;" data-col="8">Успех тек. нед. ⇅</th>
           </tr>
         </thead>
         <tbody>
