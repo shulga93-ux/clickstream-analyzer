@@ -221,6 +221,24 @@ def upload():
             # Collect for СВОД
             all_results_for_svod.append((metric_id, label, results))
 
+            # «Кандидаты» — duplicate of Тех Ошибка (55556) report
+            if metric_id == "55556":
+                candidates_filename = f"report_{upload_id}_candidates.html"
+                candidates_path = REPORT_DIR / candidates_filename
+                generate_report(df_m, summary, results, str(candidates_path), metric_id=metric_id)
+                reports.append({
+                    "metric_id": "candidates",
+                    "label": "Кандидаты",
+                    "report_url": f"/reports/{candidates_filename}",
+                    "total_records": summary.get("total_records", 0),
+                    "total_val": summary.get("total_val", 0),
+                    "unique_products": summary.get("unique_products", 0),
+                    "date_range": summary.get("date_range", {}),
+                    "anomalies_found": len(results.get("anomalies", [])),
+                    "wow_deviations": len(results.get("wow", [])),
+                    "dod_deviations": len(results.get("dod", [])),
+                })
+
         if not reports:
             return jsonify({"error": "Нет данных ни по одной метрике"}), 422
 
