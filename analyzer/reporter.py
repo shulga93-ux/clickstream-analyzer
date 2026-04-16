@@ -207,22 +207,14 @@ def _build_charts(df: pd.DataFrame, results: dict, metric_id: str = "") -> dict:
     wow = results.get("wow", [])
     wow_grouped = _group_by_product(wow) if wow else []
 
-    # 3. DoD deviations — raw day-vs-same-weekday rows (no product grouping)
-    dod = results.get("dod", [])
-
     # Store in charts dict as JSON-serialisable data (rendered via template table)
     charts["wow_grouped"] = wow_grouped[:20]
-    charts["dod_grouped"] = dod  # already limited to last 7 non-Sunday days, sorted by |delta|
     charts["wow_meta"] = {
         "curr_week_start": wow[0].get("curr_week_start", wow[0]["date_from"]),
         "curr_week_end":   wow[0].get("curr_week_end",   wow[0]["date_to"]),
         "prev_week_start": wow[0].get("prev_week_start", wow[0]["date_from"]),
         "prev_week_end":   wow[0].get("prev_week_end",   wow[0]["date_to"]),
     } if wow else {}
-    charts["dod_meta"] = {
-        "date_from": min(r["date_from"] for r in dod) if dod else "",
-        "date_to":   max(r["date_to"]   for r in dod) if dod else "",
-    }
 
     # 4. Top-20 services horizontal bar
     top_services = results.get("top_services", [])
@@ -700,8 +692,6 @@ def _build_charts(df: pd.DataFrame, results: dict, metric_id: str = "") -> dict:
                 "total_val": pm["total_val"],
                 "segment": pm["segment"],
                 "metric_name": pm["metric_name"],
-                "dod_pct": pm.get("dod_pct"),
-                "dod_delta": pm.get("dod_delta"),
                 "wow_pct": pm.get("wow_pct"),
                 "wow_delta": pm.get("wow_delta"),
                 "last_val": pm.get("last_val", 0),
@@ -746,7 +736,6 @@ def _build_charts(df: pd.DataFrame, results: dict, metric_id: str = "") -> dict:
   function buildTable(name) {{
     const pm = D.products[name];
     if (!pm) return "";
-    const dodColor = pctColor(pm.dod_pct);
     const wowColor = pctColor(pm.wow_pct);
     return `
       <table style="width:100%;border-collapse:collapse;font-size:0.88rem;">
@@ -809,16 +798,13 @@ def _render_html(summary: dict, results: dict, charts: dict, metric_id: str = ""
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     anomalies = sorted(results.get("anomalies", []), key=lambda a: a.get("timestamp", ""))
     wow = results.get("wow", [])
-    dod = results.get("dod", [])
     trends = results.get("trends", {})
     top_services = results.get("top_services", [])
     ss = results.get("status_screen", {})
 
     pd_data = results.get("product_dynamics", {})
     wow_grouped = charts.pop("wow_grouped", [])
-    dod_grouped = charts.pop("dod_grouped", [])
     wow_meta = charts.pop("wow_meta", {})
-    dod_meta = charts.pop("dod_meta", {})
 
     template = Template(HTML_TEMPLATE)
     return template.render(
@@ -826,11 +812,8 @@ def _render_html(summary: dict, results: dict, charts: dict, metric_id: str = ""
         summary=summary,
         anomalies=anomalies,
         wow=wow,
-        dod=dod,
         wow_grouped=wow_grouped,
-        dod_grouped=dod_grouped,
         wow_meta=wow_meta,
-        dod_meta=dod_meta,
         trends=trends,
         top_services=top_services,
         ss=ss,
@@ -940,10 +923,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <div class="value" style="color: #f39c12;">{{ wow_grouped | length }}</div>
       <div class="label">WoW продуктов</div>
     </div>
-    <div class="kpi-card">
-      <div class="value" style="color: #e67e22;">{{ dod_grouped | length }}</div>
-      <div class="label">DoD отклонений</div>
-    </div>
+
   </div>
 
   <!-- Timeline chart -->
@@ -1037,96 +1017,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   {% endif %}
   {% endmacro %}
 
-  {# ─── Macro: DoD table (sortable, day/date column) ─── #}
-  {% macro dod_table(rows) %}
-  {% if rows %}
-  {% set max_delta = namespace(v=1) %}
-  {% for r in rows %}{% if r.delta | abs > max_delta.v %}{% set max_delta.v = r.delta | abs %}{% endif %}{% endfor %}
-  <div style="overflow-x:auto;">
-  <table class="stat-table dev-tbl" id="dod_dev_tbl">
-    <thead>
-      <tr>
-        <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="0">День / Дата <span class="si">⇅</span></th>
-        <th style="width:28%;cursor:pointer;user-select:none;white-space:nowrap;" data-col="1">Продукт <span class="si">⇅</span></th>
-        <th style="cursor:pointer;user-select:none;white-space:nowrap;" data-col="2">Сегмент <span class="si">⇅</span></th>
-        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="3">Пред. неделя <span class="si">⇅</span></th>
-        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="4">Тек. день <span class="si">⇅</span></th>
-        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="5">Δval <span class="si">⇅</span></th>
-        <th style="text-align:right;cursor:pointer;user-select:none;white-space:nowrap;" data-col="6">% <span class="si">⇅</span></th>
-        <th style="width:70px;"></th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for r in rows %}
-    {% set is_up = r.delta > 0 %}
-    {% set bar_w = ((r.delta | abs) / max_delta.v * 68) | int %}
-    <tr>
-      <td data-val="{{ r.date_to }}" style="white-space:nowrap;font-size:0.82rem;">
-        <strong>{{ r.weekday }}</strong><br><span style="color:#888;">{{ r.date_to }}</span>
-      </td>
-      <td data-val="{{ r.lvl_2 }}"><strong>{{ r.lvl_2 }}</strong></td>
-      <td data-val="{{ r.segment }}" style="color:#666;font-size:0.82rem;">{{ r.segment }}</td>
-      <td data-val="{{ r.val_prev }}" style="text-align:right;color:#888;">{{ "{:,}".format(r.val_prev) }}</td>
-      <td data-val="{{ r.val_curr }}" style="text-align:right;">{{ "{:,}".format(r.val_curr) }}</td>
-      <td data-val="{{ r.delta }}" style="text-align:right;font-weight:700;color:{{ '#e74c3c' if is_up else '#3498db' }};">
-        {{ '+' if is_up else '' }}{{ "{:,}".format(r.delta) }}
-      </td>
-      <td data-val="{{ r.pct }}" style="text-align:right;font-weight:600;color:{{ '#e74c3c' if is_up else '#3498db' }};">
-        {{ '+' if is_up else '' }}{{ r.pct }}%
-      </td>
-      <td>
-        <div style="background:{{ '#e74c3c' if is_up else '#3498db' }};height:10px;border-radius:3px;width:{{ bar_w }}px;min-width:2px;"></div>
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  <script>
-  (function() {
-    var TID = "dod_dev_tbl";
-    var sortState = { col: null, dir: null };
-    function updateIcons(tbl, activeCol, dir) {
-      tbl.querySelectorAll("thead th[data-col] .si").forEach(function(span) {
-        var col = parseInt(span.parentNode.getAttribute("data-col"));
-        span.textContent = col === activeCol ? (dir === "desc" ? " ▼" : " ▲") : " ⇅";
-        span.style.color = col === activeCol ? "#4f8ef7" : "#bbb";
-      });
-    }
-    function sortTable(tbl, col, dir) {
-      var tbody = tbl.querySelector("tbody");
-      var rows = Array.from(tbody.querySelectorAll("tr"));
-      rows.sort(function(a, b) {
-        var av = a.cells[col] ? (a.cells[col].getAttribute("data-val") || "") : "";
-        var bv = b.cells[col] ? (b.cells[col].getAttribute("data-val") || "") : "";
-        var isDate = /^\\d{4}-\\d{2}-\\d{2}$/.test(av) && /^\\d{4}-\\d{2}-\\d{2}$/.test(bv);
-        var an = parseFloat(av), bn = parseFloat(bv);
-        var cmp = isDate ? av.localeCompare(bv) : ((!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, "ru"));
-        return dir === "desc" ? -cmp : cmp;
-      });
-      rows.forEach(function(r) { tbody.appendChild(r); });
-      sortState.col = col; sortState.dir = dir;
-      updateIcons(tbl, col, dir);
-    }
-    document.addEventListener("DOMContentLoaded", function() {
-      var tbl = document.getElementById(TID);
-      if (!tbl) return;
-      tbl.querySelectorAll("thead th[data-col]").forEach(function(th) {
-        th.addEventListener("click", function() {
-          var col = parseInt(th.getAttribute("data-col"));
-          var dir = (sortState.col === col && sortState.dir === "asc") ? "desc" : "asc";
-          sortTable(tbl, col, dir);
-        });
-      });
-      sortTable(tbl, 5, "desc");
-    });
-  })();
-  </script>
-  {% else %}
-  <div class="empty-state">✅ DoD отклонений нет</div>
-  {% endif %}
-  {% endmacro %}
-
   <!-- WoW section (full width) -->
   <div class="section">
     <h2>📅 Топ-20 продуктов с WoW отклонениями — неделя к неделе
@@ -1158,17 +1048,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
   {% endif %}
 
-  <!-- DoD section (full width) -->
-  <div class="section">
-    <h2>📆 DoD отклонения за последние 7 дней (>50%) — день к тому же дню предыдущей недели
-      {% if dod_meta %}<span style="font-size:0.75rem;font-weight:400;color:#888;margin-left:8px;">{{ dod_meta.date_from }} – {{ dod_meta.date_to }}</span>{% endif %}
-    </h2>
-    {% if dod_grouped %}
-      {{ dod_table(dod_grouped) }}
-    {% else %}
-      <div class="empty-state">✅ DoD отклонений нет (ниже порога >50% или нет пар с предыдущей неделей)</div>
-    {% endif %}
-  </div>
+
 
   <!-- Product drill-down: dropdown → bar by block_type + channel lines -->
   {% if is_status_screen and charts.status_drill %}
