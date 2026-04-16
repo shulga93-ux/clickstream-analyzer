@@ -213,8 +213,7 @@ def _build_charts(df: pd.DataFrame, results: dict, metric_id: str = "") -> dict:
         ss_enrich = results.get("ss_enrichment", {})
         for row in wow_grouped:
             prod = row.get("lvl_2", "")
-            seg  = row.get("segment", "")
-            hit  = ss_enrich.get((prod, seg)) or ss_enrich.get((prod, ""))
+            hit  = ss_enrich.get(prod)
             if hit:
                 ss_suc = hit.get("success", 0)
                 err    = row.get("val_curr", 0)

@@ -226,17 +226,16 @@ def upload():
                 import copy as _copy
                 results_candidates = _copy.deepcopy(results)
 
-                # Build (product, segment) → {success} from 55558 data
+                # Build product → {success} from 55558 data (keyed by lvl_2 only)
                 # Ratio = 55556_errors / (55556_errors + 55558_success) × 100
                 df_58 = df_full[df_full["metric_id"] == "55558"].copy()
                 ss_enrichment = {}
                 if not df_58.empty:
                     sub = df_58[df_58["lvl_4"] == "Успех"]
                     if not sub.empty:
-                        grp = sub.groupby(["lvl_2", "lvl_1"])["val"].sum()
-                        for (prod, seg), val in grp.items():
-                            key = (str(prod), str(seg))
-                            ss_enrichment[key] = {"success": int(val)}
+                        grp = sub.groupby("lvl_2")["val"].sum()
+                        for prod, val in grp.items():
+                            ss_enrichment[str(prod)] = {"success": int(val)}
 
                 results_candidates["ss_enrichment"] = ss_enrichment
 
